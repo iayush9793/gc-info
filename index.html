@@ -7,34 +7,253 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    
+    <!-- Firebase Imports -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, onAuthStateChanged, signInAnonymously, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, collection, addDoc, updateDoc, deleteDoc, doc, onSnapshot, query, getDocs } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // Global Variables provided by environment
+        const firebaseConfig = JSON.parse(__firebase_config);
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+        const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+
+        // Initialize Firebase
+        const app = initializeApp(firebaseConfig);
+        const auth = getAuth(app);
+        const db = getFirestore(app);
+
+        // State
+        let gcData = [];
+        let currentUser = null;
+
+        // UI Helpers
+        window.prepareNewForm = () => {
+            document.getElementById('gc-form').reset();
+            document.getElementById('editing-id').value = '';
+            document.getElementById('form-title-text').innerText = 'General Questions';
+            document.getElementById('submit-btn').innerText = 'Submit Records';
+            toggleView('form');
+            showSet(1);
+        };
+
+        window.showSet = (setNum) => {
+            document.querySelectorAll('.form-section').forEach(s => s.classList.remove('active'));
+            document.querySelectorAll('.tab-btn').forEach(b => {
+                b.classList.remove('active', 'text-blue-600');
+                b.classList.add('text-gray-500');
+            });
+            document.getElementById(`set-${setNum}`).classList.add('active');
+            document.getElementById(`tab-${setNum}`).classList.add('active');
+            document.getElementById(`tab-${setNum}`).classList.remove('text-gray-500');
+            document.getElementById(`tab-${setNum}`).scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+        };
+
+        window.toggleView = (view) => {
+            if (view === 'list') {
+                document.getElementById('form-container').classList.add('hidden');
+                document.getElementById('list-container').classList.remove('hidden');
+                document.getElementById('btn-show-list').classList.add('hidden');
+                document.getElementById('btn-show-form').classList.remove('hidden');
+            } else {
+                document.getElementById('form-container').classList.remove('hidden');
+                document.getElementById('list-container').classList.add('hidden');
+                document.getElementById('btn-show-list').classList.remove('hidden');
+                document.getElementById('btn-show-form').classList.add('hidden');
+            }
+        };
+
+        // Database Operations
+        const recordsCol = collection(db, 'artifacts', appId, 'public', 'data', 'gc_records');
+
+        async function initAuth() {
+            try {
+                if (initialAuthToken) {
+                    await signInWithCustomToken(auth, initialAuthToken);
+                } else {
+                    await signInAnonymously(auth);
+                }
+            } catch (error) {
+                console.error("Auth failed", error);
+            }
+        }
+
+        onAuthStateChanged(auth, (user) => {
+            currentUser = user;
+            if (user) {
+                // Real-time listener for data
+                onSnapshot(recordsCol, (snapshot) => {
+                    gcData = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id }));
+                    renderTable();
+                }, (error) => {
+                    console.error("Snapshot failed", error);
+                });
+            }
+        });
+
+        document.getElementById('gc-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            if (!currentUser) {
+                showToast("Not authenticated", "error");
+                return;
+            }
+
+            const recordId = document.getElementById('editing-id').value;
+            const data = {
+                q1: document.getElementById('q1').value,
+                q2: document.getElementById('q2').value,
+                q3: document.getElementById('q3').value,
+                q4: document.getElementById('q4').value,
+                q5: document.getElementById('q5').value,
+                q6: document.getElementById('q6').value,
+                q7: document.getElementById('q7').value,
+                q8: document.getElementById('q8').value,
+                q9: document.getElementById('q9').value,
+                q10: document.getElementById('q10').value,
+                q11: document.getElementById('q11').value,
+                q12: document.getElementById('q12').value,
+                q13: document.getElementById('q13').value,
+                q14: document.getElementById('q14').value,
+                hr: document.getElementById('hr_feedback').value,
+                updatedAt: Date.now()
+            };
+
+            try {
+                if (recordId) {
+                    await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'gc_records', recordId), data);
+                    showToast("Record updated!", "success");
+                } else {
+                    data.createdAt = Date.now();
+                    await addDoc(recordsCol, data);
+                    showToast("Record saved!", "success");
+                }
+                prepareNewForm();
+                toggleView('list');
+            } catch (err) {
+                showToast("Failed to save data", "error");
+            }
+        });
+
+        window.deleteRecord = (id) => {
+            openModal("Delete Record?", "Are you sure you want to remove this entry?", async () => {
+                try {
+                    await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'gc_records', id));
+                    showToast("Record deleted", "error");
+                    closeModal();
+                } catch (err) {
+                    showToast("Delete failed", "error");
+                }
+            });
+        };
+
+        window.editRecord = (id) => {
+            const record = gcData.find(r => r.id === id);
+            if (!record) return;
+
+            document.getElementById('editing-id').value = record.id;
+            document.getElementById('q1').value = record.q1 || '';
+            document.getElementById('q2').value = record.q2 || '';
+            document.getElementById('q3').value = record.q3 || '';
+            document.getElementById('q4').value = record.q4 || '';
+            document.getElementById('q5').value = record.q5 || '';
+            document.getElementById('q6').value = record.q6 || '';
+            document.getElementById('q7').value = record.q7 || '';
+            document.getElementById('q8').value = record.q8 || '';
+            document.getElementById('q9').value = record.q9 || '';
+            document.getElementById('q10').value = record.q10 || '';
+            document.getElementById('q11').value = record.q11 || '';
+            document.getElementById('q12').value = record.q12 || '';
+            document.getElementById('q13').value = record.q13 || '';
+            document.getElementById('q14').value = record.q14 || '';
+            document.getElementById('hr_feedback').value = record.hr || '';
+
+            document.getElementById('form-title-text').innerText = 'Updating Records...';
+            document.getElementById('submit-btn').innerText = 'Update Information';
+            
+            toggleView('form');
+            showSet(1);
+        };
+
+        function renderTable() {
+            const tbody = document.getElementById('table-body');
+            const noData = document.getElementById('no-data');
+            tbody.innerHTML = '';
+            
+            if (gcData.length === 0) {
+                noData.classList.remove('hidden');
+                return;
+            }
+            
+            noData.classList.add('hidden');
+            
+            [...gcData].sort((a,b) => (b.createdAt || 0) - (a.createdAt || 0)).forEach(item => {
+                const row = document.createElement('tr');
+                row.className = "divide-x divide-gray-100 hover:bg-blue-50/20 transition-colors";
+                row.innerHTML = `
+                    <td class="px-3 py-4 text-center whitespace-nowrap">
+                        <div class="flex items-center justify-center gap-2">
+                            <button onclick="editRecord('${item.id}')" class="action-btn p-1.5 bg-blue-50 text-blue-600 rounded-lg hover:bg-blue-100">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                            </button>
+                            <button onclick="deleteRecord('${item.id}')" class="action-btn p-1.5 bg-red-50 text-red-600 rounded-lg hover:bg-red-100">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg>
+                            </button>
+                        </div>
+                    </td>
+                    <td class="px-3 py-4 font-bold text-gray-900">${item.q1 || '—'}</td>
+                    <td class="px-3 py-4 text-gray-600">${item.q2 || '—'}</td>
+                    <td class="px-3 py-4 text-gray-600">${item.q3 || '—'}</td>
+                    <td class="px-3 py-4 text-gray-600">${item.q4 || '—'}</td>
+                    <td class="px-3 py-4 text-gray-600">${item.q5 || '—'}</td>
+                    <td class="px-3 py-4 text-gray-600">${item.q6 || '—'}</td>
+                    <td class="px-3 py-4 text-gray-600">${item.q7 || '—'}</td>
+                    <td class="px-3 py-4 text-gray-600">${item.q8 || '—'}</td>
+                    <td class="px-3 py-4 text-gray-600">${item.q9 || '—'}</td>
+                    <td class="px-3 py-4 text-gray-600">${item.q10 || '—'}</td>
+                    <td class="px-3 py-4 text-gray-600">${item.q11 || '—'}</td>
+                    <td class="px-3 py-4 text-gray-600">${item.q12 || '—'}</td>
+                    <td class="px-3 py-4 text-gray-600">${item.q13 || '—'}</td>
+                    <td class="px-3 py-4 text-gray-600">${item.q14 || '—'}</td>
+                    <td class="px-3 py-4 text-blue-700 bg-blue-50/20 italic">${item.hr || '—'}</td>
+                `;
+                tbody.appendChild(row);
+            });
+        }
+
+        window.downloadExcel = () => {
+            if (gcData.length === 0) {
+                showToast("No records to export!", "error");
+                return;
+            }
+            const header1 = ["General question", "", "", "", "", "Training Related Questions:", "", "", "", "Positive / Negative Feedback", "", "", "", "", "HR FEEDBACK:"];
+            const header2 = ["Aapka naam kya hai?", "Time Warehouse", "Shift Timing", "Safety Info", "Team Support", "Proper Training", "Machine Training", "Imp Suggestions", "Tr. Days", "Best Thing", "Culture", "Problems", "Changes", "Overall Exp", "HR REMARKS"];
+            const rows = gcData.map(item => [item.q1, item.q2, item.q3, item.q4, item.q5, item.q6, item.q7, item.q8, item.q9, item.q10, item.q11, item.q12, item.q13, item.q14, item.hr]);
+            const worksheetData = [header1, header2, ...rows];
+            const wb = XLSX.utils.book_new();
+            const ws = XLSX.utils.aoa_to_sheet(worksheetData);
+            ws['!merges'] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: 4 } }, { s: { r: 0, c: 5 }, e: { r: 0, c: 8 } }, { s: { r: 0, c: 9 }, e: { r: 0, c: 13 } }];
+            XLSX.utils.book_append_sheet(wb, ws, "Records");
+            XLSX.writeFile(wb, `GC_INFO_PRODUCTION.xlsx`);
+        };
+
+        initAuth();
+    </script>
+
     <style>
         body { font-family: 'Inter', sans-serif; background-color: #f8fafc; -webkit-tap-highlight-color: transparent; }
         .form-section { display: none; }
         .form-section.active { display: block; }
         .tab-btn.active { border-bottom: 3px solid #2563eb; color: #2563eb; font-weight: 700; background-color: white; }
-        
-        input, textarea, select {
-            width: 100%;
-            padding: 0.75rem;
-            border: 1px solid #d1d5db;
-            border-radius: 0.5rem;
-            margin-top: 0.35rem;
-            outline: none;
-            font-size: 1rem;
-            transition: all 0.2s;
-        }
-        input:focus, textarea:focus, select:focus { 
-            border-color: #2563eb; 
-            box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1); 
-        }
-
+        input, textarea, select { width: 100%; padding: 0.75rem; border: 1px solid #d1d5db; border-radius: 0.5rem; margin-top: 0.35rem; outline: none; font-size: 1rem; transition: all 0.2s; }
+        input:focus, textarea:focus, select:focus { border-color: #2563eb; box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1); }
         .custom-scrollbar::-webkit-scrollbar { height: 8px; }
         .custom-scrollbar::-webkit-scrollbar-track { background: #f1f1f1; }
         .custom-scrollbar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
-        .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
-        
         .action-btn { transition: all 0.2s; }
         .action-btn:active { transform: scale(0.9); }
+        .no-scrollbar::-webkit-scrollbar { display: none; }
     </style>
 </head>
 <body class="min-h-screen pb-10">
@@ -48,7 +267,7 @@
             <h1 class="text-lg md:text-xl font-bold text-gray-800 uppercase tracking-tight truncate">GC INFORMATION</h1>
         </div>
         <div class="flex gap-2 w-full sm:w-auto">
-            <button onclick="prepareNewForm()" id="btn-show-form" class="hidden flex-1 sm:flex-none px-4 py-2.5 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg transition-all font-semibold text-sm">Add New</button>
+            <button onclick="prepareNewForm()" id="btn-show-form" class="hidden flex-1 sm:flex-none px-4 py-2.5 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg transition-all font-semibold text-sm">Add New Record</button>
             <button onclick="toggleView('list')" id="btn-show-list" class="flex-1 sm:flex-none px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-all font-semibold text-sm shadow-sm">View Details</button>
         </div>
     </header>
@@ -66,147 +285,71 @@
             <form id="gc-form" class="p-5 md:p-8">
                 <input type="hidden" id="editing-id">
                 
-                <!-- Set 1: General Questions -->
                 <div id="set-1" class="form-section active space-y-6">
                     <div class="flex items-center gap-2 mb-4">
                         <span class="bg-blue-100 text-blue-700 w-8 h-8 rounded-full flex items-center justify-center font-bold">1</span>
                         <h2 id="form-title-text" class="text-lg font-bold text-gray-800 uppercase text-sm tracking-wide">General Questions</h2>
                     </div>
                     <div class="grid grid-cols-1 md:grid-cols-2 gap-5 md:gap-6">
-                        <div>
-                            <label class="text-sm font-semibold text-gray-600">Aapka naam kya hai?</label>
-                            <input type="text" id="q1" placeholder="Full Name" required>
-                        </div>
-                        <div>
-                            <label class="text-sm font-semibold text-gray-600">Time in warehouse?</label>
-                            <input type="text" id="q2" placeholder="e.g. 6 months">
-                        </div>
-                        <div>
-                            <label class="text-sm font-semibold text-gray-600">Shift timing?</label>
-                            <select id="q3">
-                                <option value="">Select Shift</option>
-                                <option value="A Shift">A Shift (6am - 2pm)</option>
-                                <option value="B Shift">B Shift (2pm - 10pm)</option>
-                                <option value="C Shift">C Shift (10pm - 6am)</option>
-                                <option value="General">General Shift</option>
-                            </select>
-                        </div>
-                        <div>
-                            <label class="text-sm font-semibold text-gray-600">Safety rules info given?</label>
-                            <select id="q4">
-                                <option value="Yes">Yes (Haan)</option>
-                                <option value="No">No (Nahi)</option>
-                            </select>
-                        </div>
-                        <div class="md:col-span-2">
-                            <label class="text-sm font-semibold text-gray-600">Team support milta hai?</label>
-                            <input type="text" id="q5" placeholder="Team behavior/support">
-                        </div>
+                        <div><label class="text-sm font-semibold text-gray-600">Aapka naam kya hai?</label><input type="text" id="q1" placeholder="Full Name" required></div>
+                        <div><label class="text-sm font-semibold text-gray-600">Time in warehouse?</label><input type="text" id="q2" placeholder="e.g. 6 months"></div>
+                        <div><label class="text-sm font-semibold text-gray-600">Shift timing?</label><select id="q3"><option value="">Select Shift</option><option value="A Shift">A Shift (6am - 2pm)</option><option value="B Shift">B Shift (2pm - 10pm)</option><option value="C Shift">C Shift (10pm - 6am)</option><option value="General">General Shift</option></select></div>
+                        <div><label class="text-sm font-semibold text-gray-600">Safety rules info given?</label><select id="q4"><option value="Yes">Yes (Haan)</option><option value="No">No (Nahi)</option></select></div>
+                        <div class="md:col-span-2"><label class="text-sm font-semibold text-gray-600">Team support milta hai?</label><input type="text" id="q5" placeholder="Team behavior/support"></div>
                     </div>
-                    <div class="flex justify-end pt-4">
-                        <button type="button" onclick="showSet(2)" class="w-full md:w-auto px-8 py-3 bg-blue-600 text-white rounded-xl font-bold shadow-md active:scale-95 transition-transform">Continue to Training</button>
-                    </div>
+                    <div class="flex justify-end pt-4"><button type="button" onclick="showSet(2)" class="w-full md:w-auto px-8 py-3 bg-blue-600 text-white rounded-xl font-bold">Continue to Training</button></div>
                 </div>
 
-                <!-- Set 2: Training Related -->
                 <div id="set-2" class="form-section space-y-6">
-                    <div class="flex items-center gap-2 mb-4">
-                        <span class="bg-orange-100 text-orange-700 w-8 h-8 rounded-full flex items-center justify-center font-bold">2</span>
-                        <h2 class="text-lg font-bold text-gray-800 uppercase text-sm tracking-wide">Training Questions</h2>
-                    </div>
+                    <div class="flex items-center gap-2 mb-4"><span class="bg-orange-100 text-orange-700 w-8 h-8 rounded-full flex items-center justify-center font-bold">2</span><h2 class="text-lg font-bold text-gray-800 uppercase text-sm tracking-wide">Training Questions</h2></div>
                     <div class="grid grid-cols-1 md:grid-cols-2 gap-5 md:gap-6">
-                        <div>
-                            <label class="text-sm font-semibold text-gray-600">Proper training at joining?</label>
-                            <select id="q6">
-                                <option value="Yes">Yes</option>
-                                <option value="No">No</option>
-                            </select>
-                        </div>
-                        <div>
-                            <label class="text-sm font-semibold text-gray-600">Machines/Equipment training?</label>
-                            <select id="q7">
-                                <option value="Yes">Yes</option>
-                                <option value="No">No</option>
-                            </select>
-                        </div>
-                        <div>
-                            <label class="text-sm font-semibold text-gray-600">Improvement suggestions?</label>
-                            <textarea id="q8" rows="2" placeholder="What could be better?"></textarea>
-                        </div>
-                        <div>
-                            <label class="text-sm font-semibold text-gray-600">Training duration (days)?</label>
-                            <input type="text" id="q9" placeholder="Number of days">
-                        </div>
+                        <div><label class="text-sm font-semibold text-gray-600">Proper training at joining?</label><select id="q6"><option value="Yes">Yes</option><option value="No">No</option></select></div>
+                        <div><label class="text-sm font-semibold text-gray-600">Machines/Equipment training?</label><select id="q7"><option value="Yes">Yes</option><option value="No">No</option></select></div>
+                        <div><label class="text-sm font-semibold text-gray-600">Improvement suggestions?</label><textarea id="q8" rows="2"></textarea></div>
+                        <div><label class="text-sm font-semibold text-gray-600">Training duration (days)?</label><input type="text" id="q9"></div>
                     </div>
-                    <div class="flex flex-col-reverse md:flex-row justify-between gap-3 pt-4">
-                        <button type="button" onclick="showSet(1)" class="px-8 py-3 bg-gray-100 text-gray-700 rounded-xl font-bold">Back</button>
-                        <button type="button" onclick="showSet(3)" class="px-8 py-3 bg-blue-600 text-white rounded-xl font-bold shadow-md active:scale-95 transition-transform">Continue to Feedback</button>
-                    </div>
+                    <div class="flex flex-col-reverse md:flex-row justify-between gap-3 pt-4"><button type="button" onclick="showSet(1)" class="px-8 py-3 bg-gray-100 text-gray-700 rounded-xl font-bold">Back</button><button type="button" onclick="showSet(3)" class="px-8 py-3 bg-blue-600 text-white rounded-xl font-bold">Continue to Feedback</button></div>
                 </div>
 
-                <!-- Set 3: Feedback & HR -->
                 <div id="set-3" class="form-section space-y-6">
-                    <div class="flex items-center gap-2 mb-4">
-                        <span class="bg-green-100 text-green-700 w-8 h-8 rounded-full flex items-center justify-center font-bold">3</span>
-                        <h2 class="text-lg font-bold text-gray-800 uppercase text-sm tracking-wide">Final Feedback</h2>
-                    </div>
+                    <div class="flex items-center gap-2 mb-4"><span class="bg-green-100 text-green-700 w-8 h-8 rounded-full flex items-center justify-center font-bold">3</span><h2 class="text-lg font-bold text-gray-800 uppercase text-sm tracking-wide">Final Feedback</h2></div>
                     <div class="grid grid-cols-1 gap-5">
                         <div class="grid grid-cols-1 md:grid-cols-2 gap-5">
-                            <div>
-                                <label class="text-sm font-semibold text-gray-600">Best thing about warehouse?</label>
-                                <input type="text" id="q10">
-                            </div>
-                            <div>
-                                <label class="text-sm font-semibold text-gray-600">Work culture rating/opinion?</label>
-                                <input type="text" id="q11">
-                            </div>
+                            <div><label class="text-sm font-semibold text-gray-600">Best thing about warehouse?</label><input type="text" id="q10"></div>
+                            <div><label class="text-sm font-semibold text-gray-600">Work culture rating/opinion?</label><input type="text" id="q11"></div>
                         </div>
-                        <div>
-                            <label class="text-sm font-semibold text-gray-600">Biggest problem faced?</label>
-                            <textarea id="q12" rows="2"></textarea>
-                        </div>
-                        <div>
-                            <label class="text-sm font-semibold text-gray-600">One change you want to see?</label>
-                            <input type="text" id="q13">
-                        </div>
-                        <div>
-                            <label class="text-sm font-semibold text-gray-600">Overall experience (+/-)? Why?</label>
-                            <textarea id="q14" rows="2"></textarea>
-                        </div>
-                        <div class="mt-4 p-5 bg-blue-50 border border-blue-100 rounded-2xl">
-                            <label class="block text-xs font-bold text-blue-800 mb-2 uppercase tracking-widest">FINAL HR FEEDBACK (Optional)</label>
-                            <textarea id="hr_feedback" rows="3" placeholder="Enter HR summary here..." class="bg-white border-blue-200"></textarea>
-                        </div>
+                        <div><label class="text-sm font-semibold text-gray-600">Biggest problem faced?</label><textarea id="q12" rows="2"></textarea></div>
+                        <div><label class="text-sm font-semibold text-gray-600">One change you want to see?</label><input type="text" id="q13"></div>
+                        <div><label class="text-sm font-semibold text-gray-600">Overall experience (+/-)? Why?</label><textarea id="q14" rows="2"></textarea></div>
+                        <div class="mt-4 p-5 bg-blue-50 border border-blue-100 rounded-2xl"><label class="block text-xs font-bold text-blue-800 mb-2 uppercase tracking-widest">FINAL HR FEEDBACK</label><textarea id="hr_feedback" rows="3" class="bg-white border-blue-200"></textarea></div>
                     </div>
-                    <div class="flex flex-col-reverse md:flex-row justify-between gap-3 pt-6">
-                        <button type="button" onclick="showSet(2)" class="px-8 py-3 bg-gray-100 text-gray-700 rounded-xl font-bold">Back</button>
-                        <button type="submit" id="submit-btn" class="px-10 py-4 bg-green-600 hover:bg-green-700 text-white rounded-xl font-black text-lg transition-all shadow-xl active:scale-95 uppercase">Submit Records</button>
-                    </div>
+                    <div class="flex flex-col-reverse md:flex-row justify-between gap-3 pt-6"><button type="button" onclick="showSet(2)" class="px-8 py-3 bg-gray-100 text-gray-700 rounded-xl font-bold">Back</button><button type="submit" id="submit-btn" class="px-10 py-4 bg-green-600 hover:bg-green-700 text-white rounded-xl font-black text-lg transition-all shadow-xl active:scale-95">Submit Records</button></div>
                 </div>
             </form>
         </div>
 
         <!-- List Section -->
-        <div id="list-container" class="hidden animate-in fade-in duration-300">
+        <div id="list-container" class="hidden">
             <div class="bg-white rounded-2xl shadow-sm border border-gray-200 p-4 md:p-6">
                 <div class="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-4">
                     <div>
                         <h2 class="text-xl font-black text-gray-800">GC RECORDS</h2>
-                        <p class="text-sm text-gray-500">Manage individual employee entries</p>
+                        <p class="text-sm text-gray-500">Manage all employee entries</p>
                     </div>
-                    <div class="flex gap-2 w-full md:w-auto">
+                    <div class="flex flex-wrap gap-2 w-full md:w-auto">
+                        <button onclick="prepareNewForm()" class="flex-1 md:flex-none flex items-center justify-center gap-2 px-4 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold transition-all shadow-lg active:scale-95">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                            Fill New Record
+                        </button>
                         <button onclick="downloadExcel()" class="flex-1 md:flex-none flex items-center justify-center gap-2 px-4 py-3 bg-green-600 hover:bg-green-700 text-white rounded-xl font-bold transition-all shadow-lg">
                             <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
                             Export
-                        </button>
-                        <button onclick="clearData()" class="px-4 py-3 bg-red-50 text-red-600 hover:bg-red-100 rounded-xl font-bold transition-all" title="Clear all data">
-                            <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg>
                         </button>
                     </div>
                 </div>
 
                 <div class="overflow-x-auto rounded-xl border border-gray-100 custom-scrollbar">
-                    <table id="gc-table" class="min-w-full divide-y divide-gray-200 text-[11px] md:text-xs">
+                    <table class="min-w-full divide-y divide-gray-200 text-[11px] md:text-xs">
                         <thead class="bg-gray-50">
                             <tr>
                                 <th class="px-3 py-3 text-center border-r font-bold text-gray-700 bg-gray-100">ACTIONS</th>
@@ -216,7 +359,7 @@
                                 <th class="px-4 py-3 text-center font-bold text-gray-700 uppercase bg-gray-100">HR Remarks</th>
                             </tr>
                             <tr class="divide-x divide-gray-200">
-                                <th class="px-3 py-4 text-center">Manage</th>
+                                <th class="px-3 py-4">Manage</th>
                                 <th class="px-3 py-4 text-left font-bold text-gray-500 whitespace-nowrap">Name</th>
                                 <th class="px-3 py-4 text-left font-bold text-gray-500 whitespace-nowrap">Tenure</th>
                                 <th class="px-3 py-4 text-left font-bold text-gray-500 whitespace-nowrap">Shift</th>
@@ -234,219 +377,43 @@
                                 <th class="px-3 py-4 text-left font-bold text-gray-500">Comments</th>
                             </tr>
                         </thead>
-                        <tbody id="table-body" class="bg-white divide-y divide-gray-100">
-                            <!-- Data populated by JS -->
-                        </tbody>
+                        <tbody id="table-body" class="bg-white divide-y divide-gray-100"></tbody>
                     </table>
                 </div>
                 <div id="no-data" class="py-20 text-center flex flex-col items-center">
-                    <div class="bg-gray-100 p-4 rounded-full mb-3 text-gray-300">
-                        <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="9" y1="15" x2="15" y2="15"/></svg>
-                    </div>
                     <p class="text-gray-400 font-medium italic">No employee records found.</p>
                 </div>
             </div>
         </div>
     </main>
 
-    <!-- Toast Notification -->
+    <!-- UI Components -->
     <div id="toast" class="fixed bottom-6 left-1/2 -translate-x-1/2 md:translate-x-0 md:left-auto md:right-6 translate-y-20 opacity-0 bg-gray-900 text-white px-6 py-4 rounded-2xl shadow-2xl transition-all duration-300 pointer-events-none flex items-center gap-3 z-[100] w-[90%] md:w-auto">
-        <div id="toast-icon-bg" class="bg-green-500 rounded-full p-1.5">
-            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
-        </div>
+        <div id="toast-icon-bg" class="bg-green-500 rounded-full p-1.5"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></div>
         <span id="toast-msg" class="font-bold text-sm">Action Successful</span>
     </div>
 
-    <!-- Confirm Modal -->
     <div id="confirm-modal" class="fixed inset-0 bg-black/50 hidden z-[101] flex items-center justify-center p-4">
         <div class="bg-white rounded-2xl p-6 max-w-sm w-full shadow-2xl scale-95 transition-all">
             <h3 id="modal-title" class="text-lg font-bold mb-2">Are you sure?</h3>
-            <p id="modal-desc" class="text-gray-500 text-sm mb-6">This action cannot be undone.</p>
+            <p id="modal-desc" class="text-gray-500 text-sm mb-6"></p>
             <div class="flex gap-3">
                 <button onclick="closeModal()" class="flex-1 py-3 bg-gray-100 rounded-xl font-bold">Cancel</button>
-                <button id="modal-confirm-btn" class="flex-1 py-3 bg-red-600 text-white rounded-xl font-bold">Yes, Delete</button>
+                <button id="modal-confirm-btn" class="flex-1 py-3 bg-red-600 text-white rounded-xl font-bold">Confirm</button>
             </div>
         </div>
     </div>
 
     <script>
-        let gcData = JSON.parse(localStorage.getItem('gc_records')) || [];
-
-        function showSet(setNum) {
-            document.querySelectorAll('.form-section').forEach(s => s.classList.remove('active'));
-            document.querySelectorAll('.tab-btn').forEach(b => {
-                b.classList.remove('active', 'text-blue-600');
-                b.classList.add('text-gray-500');
-            });
-            
-            document.getElementById(`set-${setNum}`).classList.add('active');
-            document.getElementById(`tab-${setNum}`).classList.add('active');
-            document.getElementById(`tab-${setNum}`).classList.remove('text-gray-500');
-            
-            document.getElementById(`tab-${setNum}`).scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
-            window.scrollTo({ top: 0, behavior: 'smooth' });
-        }
-
-        function toggleView(view) {
-            if (view === 'list') {
-                document.getElementById('form-container').classList.add('hidden');
-                document.getElementById('list-container').classList.remove('hidden');
-                document.getElementById('btn-show-list').classList.add('hidden');
-                document.getElementById('btn-show-form').classList.remove('hidden');
-                renderTable();
-            } else {
-                document.getElementById('form-container').classList.remove('hidden');
-                document.getElementById('list-container').classList.add('hidden');
-                document.getElementById('btn-show-list').classList.remove('hidden');
-                document.getElementById('btn-show-form').classList.add('hidden');
-            }
-        }
-
-        function prepareNewForm() {
-            document.getElementById('gc-form').reset();
-            document.getElementById('editing-id').value = '';
-            document.getElementById('form-title-text').innerText = 'General Questions';
-            document.getElementById('submit-btn').innerText = 'Submit Records';
-            toggleView('form');
-            showSet(1);
-        }
-
-        document.getElementById('gc-form').addEventListener('submit', function(e) {
-            e.preventDefault();
-            
-            const recordId = document.getElementById('editing-id').value;
-            const newRecord = {
-                id: recordId ? parseInt(recordId) : Date.now(),
-                q1: document.getElementById('q1').value,
-                q2: document.getElementById('q2').value,
-                q3: document.getElementById('q3').value,
-                q4: document.getElementById('q4').value,
-                q5: document.getElementById('q5').value,
-                q6: document.getElementById('q6').value,
-                q7: document.getElementById('q7').value,
-                q8: document.getElementById('q8').value,
-                q9: document.getElementById('q9').value,
-                q10: document.getElementById('q10').value,
-                q11: document.getElementById('q11').value,
-                q12: document.getElementById('q12').value,
-                q13: document.getElementById('q13').value,
-                q14: document.getElementById('q14').value,
-                hr: document.getElementById('hr_feedback').value
-            };
-
-            if (recordId) {
-                // Update existing
-                const index = gcData.findIndex(r => r.id === parseInt(recordId));
-                if (index !== -1) gcData[index] = newRecord;
-                showToast("Record updated!", "success");
-            } else {
-                // Add new
-                gcData.push(newRecord);
-                showToast("Record added!", "success");
-            }
-
-            saveData();
-            prepareNewForm();
-            toggleView('list');
-        });
-
-        function saveData() {
-            localStorage.setItem('gc_records', JSON.stringify(gcData));
-        }
-
-        function renderTable() {
-            const tbody = document.getElementById('table-body');
-            const noData = document.getElementById('no-data');
-            tbody.innerHTML = '';
-            
-            if (gcData.length === 0) {
-                noData.classList.remove('hidden');
-                return;
-            }
-            
-            noData.classList.add('hidden');
-            
-            [...gcData].reverse().forEach(item => {
-                const row = document.createElement('tr');
-                row.className = "divide-x divide-gray-100 hover:bg-blue-50/20 transition-colors";
-                row.innerHTML = `
-                    <td class="px-3 py-4 text-center whitespace-nowrap">
-                        <div class="flex items-center justify-center gap-2">
-                            <button onclick="editRecord(${item.id})" class="action-btn p-1.5 bg-blue-50 text-blue-600 rounded-lg hover:bg-blue-100" title="Edit">
-                                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
-                            </button>
-                            <button onclick="deleteRecord(${item.id})" class="action-btn p-1.5 bg-red-50 text-red-600 rounded-lg hover:bg-red-100" title="Delete">
-                                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg>
-                            </button>
-                        </div>
-                    </td>
-                    <td class="px-3 py-4 font-bold text-gray-900">${item.q1}</td>
-                    <td class="px-3 py-4 text-gray-600">${item.q2}</td>
-                    <td class="px-3 py-4 text-gray-600">${item.q3}</td>
-                    <td class="px-3 py-4 text-gray-600">${item.q4}</td>
-                    <td class="px-3 py-4 text-gray-600">${item.q5}</td>
-                    <td class="px-3 py-4 text-gray-600">${item.q6}</td>
-                    <td class="px-3 py-4 text-gray-600">${item.q7}</td>
-                    <td class="px-3 py-4 text-gray-600">${item.q8}</td>
-                    <td class="px-3 py-4 text-gray-600">${item.q9}</td>
-                    <td class="px-3 py-4 text-gray-600">${item.q10}</td>
-                    <td class="px-3 py-4 text-gray-600">${item.q11}</td>
-                    <td class="px-3 py-4 text-gray-600">${item.q12}</td>
-                    <td class="px-3 py-4 text-gray-600">${item.q13}</td>
-                    <td class="px-3 py-4 text-gray-600">${item.q14}</td>
-                    <td class="px-3 py-4 text-blue-700 bg-blue-50/20 italic">${item.hr || '—'}</td>
-                `;
-                tbody.appendChild(row);
-            });
-        }
-
-        function editRecord(id) {
-            const record = gcData.find(r => r.id === id);
-            if (!record) return;
-
-            document.getElementById('editing-id').value = record.id;
-            document.getElementById('q1').value = record.q1;
-            document.getElementById('q2').value = record.q2;
-            document.getElementById('q3').value = record.q3;
-            document.getElementById('q4').value = record.q4;
-            document.getElementById('q5').value = record.q5;
-            document.getElementById('q6').value = record.q6;
-            document.getElementById('q7').value = record.q7;
-            document.getElementById('q8').value = record.q8;
-            document.getElementById('q9').value = record.q9;
-            document.getElementById('q10').value = record.q10;
-            document.getElementById('q11').value = record.q11;
-            document.getElementById('q12').value = record.q12;
-            document.getElementById('q13').value = record.q13;
-            document.getElementById('q14').value = record.q14;
-            document.getElementById('hr_feedback').value = record.hr;
-
-            document.getElementById('form-title-text').innerText = 'Updating Records...';
-            document.getElementById('submit-btn').innerText = 'Update Information';
-            
-            toggleView('form');
-            showSet(1);
-        }
-
-        function deleteRecord(id) {
-            openModal("Delete Record?", "Are you sure you want to remove this employee entry?", () => {
-                gcData = gcData.filter(r => r.id !== id);
-                saveData();
-                renderTable();
-                showToast("Record deleted", "error");
-                closeModal();
-            });
-        }
-
-        function clearData() {
-            if (gcData.length === 0) return;
-            openModal("Clear Database?", "All employee records will be permanently deleted.", () => {
-                gcData = [];
-                saveData();
-                renderTable();
-                showToast("Database cleared", "error");
-                closeModal();
-            });
+        // Non-Firebase dependent UI functions
+        function showToast(msg, type = "success") {
+            const toast = document.getElementById('toast');
+            const iconBg = document.getElementById('toast-icon-bg');
+            document.getElementById('toast-msg').innerText = msg;
+            iconBg.className = type === "error" ? 'bg-red-500 rounded-full p-1.5' : 'bg-green-500 rounded-full p-1.5';
+            toast.classList.remove('translate-y-20', 'opacity-0');
+            toast.classList.add('translate-y-0', 'opacity-100');
+            setTimeout(() => { toast.classList.add('translate-y-20', 'opacity-0'); toast.classList.remove('translate-y-0', 'opacity-100'); }, 3000);
         }
 
         function openModal(title, desc, onConfirm) {
@@ -456,65 +423,7 @@
             document.getElementById('confirm-modal').classList.remove('hidden');
         }
 
-        function closeModal() {
-            document.getElementById('confirm-modal').classList.add('hidden');
-        }
-
-        function downloadExcel() {
-            if (gcData.length === 0) {
-                showToast("No records to export!", "error");
-                return;
-            }
-
-            const header1 = ["General question", "", "", "", "", "Training Related Questions:", "", "", "", "Positive / Negative Feedback", "", "", "", "", "HR FEEDBACK:"];
-            const header2 = [
-                "Aapka naam kya hai?", "Time Warehouse", "Shift Timing", "Safety Info", "Team Support",
-                "Proper Training", "Machine Training", "Imp Suggestions", "Tr. Days",
-                "Best Thing", "Culture", "Problems", "Changes", "Overall Exp", "HR REMARKS"
-            ];
-
-            const rows = gcData.map(item => [
-                item.q1, item.q2, item.q3, item.q4, item.q5,
-                item.q6, item.q7, item.q8, item.q9,
-                item.q10, item.q11, item.q12, item.q13, item.q14,
-                item.hr
-            ]);
-
-            const worksheetData = [header1, header2, ...rows];
-            const wb = XLSX.utils.book_new();
-            const ws = XLSX.utils.aoa_to_sheet(worksheetData);
-
-            ws['!merges'] = [
-                { s: { r: 0, c: 0 }, e: { r: 0, c: 4 } },
-                { s: { r: 0, c: 5 }, e: { r: 0, c: 8 } },
-                { s: { r: 0, c: 9 }, e: { r: 0, c: 13 } }
-            ];
-
-            XLSX.utils.book_append_sheet(wb, ws, "Records");
-            XLSX.writeFile(wb, `GC_INFO_${new Date().toISOString().split('T')[0]}.xlsx`);
-        }
-
-        function showToast(msg, type = "success") {
-            const toast = document.getElementById('toast');
-            const iconBg = document.getElementById('toast-icon-bg');
-            document.getElementById('toast-msg').innerText = msg;
-            
-            if (type === "error") {
-                iconBg.className = 'bg-red-500 rounded-full p-1.5';
-            } else {
-                iconBg.className = 'bg-green-500 rounded-full p-1.5';
-            }
-
-            toast.classList.remove('translate-y-20', 'opacity-0');
-            toast.classList.add('translate-y-0', 'opacity-100');
-            
-            setTimeout(() => {
-                toast.classList.add('translate-y-20', 'opacity-0');
-                toast.classList.remove('translate-y-0', 'opacity-100');
-            }, 3000);
-        }
-
-        renderTable();
+        function closeModal() { document.getElementById('confirm-modal').classList.add('hidden'); }
     </script>
 </body>
 </html>
