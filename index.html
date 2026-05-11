@@ -29,25 +29,8 @@
         import { getAuth, onAuthStateChanged, signInAnonymously, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
         import { getFirestore, collection, addDoc, updateDoc, deleteDoc, doc, onSnapshot } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
-        // Environment Variables Handling
-        let firebaseConfig = {};
-        try {
-            firebaseConfig = typeof __firebase_config === 'string' ? JSON.parse(__firebase_config) : (__firebase_config || {});
-        } catch (e) {
-            console.error("Firebase config error", e);
-        }
-
-        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
-        const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
-
-        const app = initializeApp(firebaseConfig);
-        const auth = getAuth(app);
-        const db = getFirestore(app);
-
-        let gcData = [];
-        let currentUser = null;
-
-        // --- GLOBAL UI FUNCTIONS ---
+        // --- 1. ATTACH UI FUNCTIONS TO WINDOW IMMEDIATELY ---
+        // This ensures buttons work even if Firebase is still loading
         window.prepareNewForm = () => {
             const form = document.getElementById('gc-form');
             if (form) form.reset();
@@ -89,272 +72,255 @@
             }
         };
 
-        // --- DATABASE OPERATIONS ---
-        const recordsCol = collection(db, 'artifacts', appId, 'public', 'data', 'gc_records');
+        // --- 2. FIREBASE INITIALIZATION ---
+        let firebaseConfig = {};
+        let appId = 'default-app';
+        let initialAuthToken = null;
 
-        async function initAuth() {
-            try {
-                if (initialAuthToken) {
-                    await signInWithCustomToken(auth, initialAuthToken);
-                } else {
-                    await signInAnonymously(auth);
-                }
-            } catch (error) {
-                console.error("Auth failed", error);
-                window.showToast("Connection Error", "error");
+        try {
+            // Check if environment variables exist
+            if (typeof __firebase_config !== 'undefined') {
+                firebaseConfig = typeof __firebase_config === 'string' ? JSON.parse(__firebase_config) : __firebase_config;
             }
+            if (typeof __app_id !== 'undefined') appId = __app_id;
+            if (typeof __initial_auth_token !== 'undefined') initialAuthToken = __initial_auth_token;
+        } catch (e) {
+            console.warn("Config parsing error - using default/empty config", e);
         }
 
-        onAuthStateChanged(auth, (user) => {
-            currentUser = user;
-            if (user) {
-                onSnapshot(recordsCol, (snapshot) => {
-                    gcData = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id }));
-                    renderTable();
-                }, (error) => {
-                    console.error("Snapshot error", error);
-                });
-            }
-        });
+        // Only initialize if config is not empty
+        if (Object.keys(firebaseConfig).length > 0) {
+            const app = initializeApp(firebaseConfig);
+            const auth = getAuth(app);
+            const db = getFirestore(app);
+            const recordsCol = collection(db, 'artifacts', appId, 'public', 'data', 'gc_records');
 
-        document.getElementById('gc-form').addEventListener('submit', async (e) => {
-            e.preventDefault();
-            if (!currentUser) {
-                window.showToast("Connecting to server...", "error");
-                await initAuth();
-                if (!currentUser) return;
-            }
+            let gcData = [];
+            let currentUser = null;
 
-            const recordId = document.getElementById('editing-id').value;
-            const data = {
-                q1: document.getElementById('q1').value,
-                q2: document.getElementById('q2').value,
-                q3: document.getElementById('q3').value,
-                q4: document.getElementById('q4').value,
-                q5: document.getElementById('q5').value,
-                q6: document.getElementById('q6').value,
-                q7: document.getElementById('q7').value,
-                q8: document.getElementById('q8').value,
-                q9: document.getElementById('q9').value,
-                q10: document.getElementById('q10').value,
-                q11: document.getElementById('q11').value,
-                q12: document.getElementById('q12').value,
-                q13: document.getElementById('q13').value,
-                q14: document.getElementById('q14').value,
-                hr: document.getElementById('hr_feedback').value,
-                updatedAt: Date.now()
-            };
-
-            try {
-                if (recordId) {
-                    await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'gc_records', recordId), data);
-                    window.showToast("Record updated!", "success");
-                } else {
-                    data.createdAt = Date.now();
-                    await addDoc(recordsCol, data);
-                    window.showToast("Record saved!", "success");
-                }
-                window.prepareNewForm();
-                window.toggleView('list');
-            } catch (err) {
-                console.error("Save error", err);
-                window.showToast("Failed to save", "error");
-            }
-        });
-
-        window.deleteRecord = (id) => {
-            window.openModal("Delete Record?", "Delete this employee entry permanently?", async () => {
+            async function initAuth() {
                 try {
-                    await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'gc_records', id));
-                    window.showToast("Record deleted", "error");
-                    window.closeModal();
-                } catch (err) {
-                    window.showToast("Delete failed", "error");
+                    if (initialAuthToken) {
+                        await signInWithCustomToken(auth, initialAuthToken);
+                    } else {
+                        await signInAnonymously(auth);
+                    }
+                } catch (error) {
+                    console.error("Auth failed", error);
+                }
+            }
+
+            onAuthStateChanged(auth, (user) => {
+                currentUser = user;
+                if (user) {
+                    onSnapshot(recordsCol, (snapshot) => {
+                        gcData = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id }));
+                        renderTable(gcData);
+                    });
                 }
             });
-        };
 
-        window.editRecord = (id) => {
-            const record = gcData.find(r => r.id === id);
-            if (!record) return;
+            document.getElementById('gc-form').addEventListener('submit', async (e) => {
+                e.preventDefault();
+                if (!currentUser) {
+                    window.showToast("Authenticating...", "error");
+                    await initAuth();
+                    if (!currentUser) return;
+                }
 
-            document.getElementById('editing-id').value = record.id;
-            document.getElementById('q1').value = record.q1 || '';
-            document.getElementById('q2').value = record.q2 || '';
-            document.getElementById('q3').value = record.q3 || '';
-            document.getElementById('q4').value = record.q4 || '';
-            document.getElementById('q5').value = record.q5 || '';
-            document.getElementById('q6').value = record.q6 || '';
-            document.getElementById('q7').value = record.q7 || '';
-            document.getElementById('q8').value = record.q8 || '';
-            document.getElementById('q9').value = record.q9 || '';
-            document.getElementById('q10').value = record.q10 || '';
-            document.getElementById('q11').value = record.q11 || '';
-            document.getElementById('q12').value = record.q12 || '';
-            document.getElementById('q13').value = record.q13 || '';
-            document.getElementById('q14').value = record.q14 || '';
-            document.getElementById('hr_feedback').value = record.hr || '';
+                const recordId = document.getElementById('editing-id').value;
+                const data = {
+                    q1: document.getElementById('q1').value,
+                    q2: document.getElementById('q2').value,
+                    q3: document.getElementById('q3').value,
+                    q4: document.getElementById('q4').value,
+                    q5: document.getElementById('q5').value,
+                    q6: document.getElementById('q6').value,
+                    q7: document.getElementById('q7').value,
+                    q8: document.getElementById('q8').value,
+                    q9: document.getElementById('q9').value,
+                    q10: document.getElementById('q10').value,
+                    q11: document.getElementById('q11').value,
+                    q12: document.getElementById('q12').value,
+                    q13: document.getElementById('q13').value,
+                    q14: document.getElementById('q14').value,
+                    hr: document.getElementById('hr_feedback').value,
+                    updatedAt: Date.now()
+                };
 
-            document.getElementById('form-title-text').innerText = 'Updating Records...';
-            document.getElementById('submit-btn').innerText = 'Update Information';
-            
-            window.toggleView('form');
-            window.showSet(1);
-        };
+                try {
+                    if (recordId) {
+                        await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'gc_records', recordId), data);
+                        window.showToast("Record updated!", "success");
+                    } else {
+                        data.createdAt = Date.now();
+                        await addDoc(recordsCol, data);
+                        window.showToast("Record saved!", "success");
+                    }
+                    window.prepareNewForm();
+                    window.toggleView('list');
+                } catch (err) {
+                    window.showToast("Save failed", "error");
+                }
+            });
 
-        function renderTable() {
+            window.deleteRecord = (id) => {
+                window.openModal("Delete Record?", "Delete this entry permanently?", async () => {
+                    try {
+                        await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'gc_records', id));
+                        window.showToast("Deleted", "error");
+                        window.closeModal();
+                    } catch (err) { window.showToast("Failed", "error"); }
+                });
+            };
+
+            window.editRecord = (id) => {
+                const record = gcData.find(r => r.id === id);
+                if (!record) return;
+                document.getElementById('editing-id').value = record.id;
+                document.getElementById('q1').value = record.q1 || '';
+                document.getElementById('q2').value = record.q2 || '';
+                document.getElementById('q3').value = record.q3 || '';
+                document.getElementById('q4').value = record.q4 || '';
+                document.getElementById('q5').value = record.q5 || '';
+                document.getElementById('q6').value = record.q6 || '';
+                document.getElementById('q7').value = record.q7 || '';
+                document.getElementById('q8').value = record.q8 || '';
+                document.getElementById('q9').value = record.q9 || '';
+                document.getElementById('q10').value = record.q10 || '';
+                document.getElementById('q11').value = record.q11 || '';
+                document.getElementById('q12').value = record.q12 || '';
+                document.getElementById('q13').value = record.q13 || '';
+                document.getElementById('q14').value = record.q14 || '';
+                document.getElementById('hr_feedback').value = record.hr || '';
+                document.getElementById('form-title-text').innerText = 'Updating...';
+                document.getElementById('submit-btn').innerText = 'Update Information';
+                window.toggleView('form');
+                window.showSet(1);
+            };
+
+            window.downloadExcel = () => {
+                if (!gcData.length) return window.showToast("No data", "error");
+                const header1 = ["General", "", "", "", "", "Training", "", "", "", "Feedback", "", "", "", "", "HR"];
+                const header2 = ["Name", "Tenure", "Shift", "Safety", "Support", "Join", "Mach", "Imp", "Days", "Best", "Culture", "Prob", "Chg", "Exp", "HR"];
+                const rows = gcData.map(i => [i.q1, i.q2, i.q3, i.q4, i.q5, i.q6, i.q7, i.q8, i.q9, i.q10, i.q11, i.q12, i.q13, i.q14, i.hr]);
+                const ws = XLSX.utils.aoa_to_sheet([header1, header2, ...rows]);
+                ws['!merges'] = [{s:{r:0,c:0},e:{r:0,c:4}},{s:{r:0,c:5},e:{r:0,c:8}},{s:{r:0,c:9},e:{r:0,c:13}}];
+                const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, "Records");
+                XLSX.writeFile(wb, "GC_RECORDS.xlsx");
+            };
+
+            initAuth();
+        } else {
+            console.error("FIREBASE CONFIG MISSING. Hosting on Vercel requires a valid config.");
+            window.addEventListener('load', () => {
+                window.showToast("Database not configured", "error");
+            });
+        }
+
+        function renderTable(data) {
             const tbody = document.getElementById('table-body');
             const noData = document.getElementById('no-data');
             if (!tbody) return;
-            
             tbody.innerHTML = '';
-            
-            if (gcData.length === 0) {
-                noData.classList.remove('hidden');
-                return;
-            }
-            
+            if (!data.length) return noData.classList.remove('hidden');
             noData.classList.add('hidden');
-            
-            [...gcData].sort((a,b) => (b.createdAt || 0) - (a.createdAt || 0)).forEach(item => {
+            [...data].sort((a,b) => (b.createdAt||0) - (a.createdAt||0)).forEach(item => {
                 const row = document.createElement('tr');
-                row.className = "divide-x divide-gray-100 hover:bg-blue-50/20 transition-colors";
+                row.className = "divide-x divide-gray-100 hover:bg-blue-50/20";
                 row.innerHTML = `
                     <td class="px-3 py-4 text-center whitespace-nowrap">
-                        <div class="flex items-center justify-center gap-2">
-                            <button onclick="editRecord('${item.id}')" class="action-btn p-1.5 bg-blue-50 text-blue-600 rounded-lg hover:bg-blue-100">
-                                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
-                            </button>
-                            <button onclick="deleteRecord('${item.id}')" class="action-btn p-1.5 bg-red-50 text-red-600 rounded-lg hover:bg-red-100">
-                                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg>
-                            </button>
+                        <div class="flex gap-2 justify-center">
+                            <button onclick="editRecord('${item.id}')" class="p-1.5 bg-blue-50 text-blue-600 rounded">Edit</button>
+                            <button onclick="deleteRecord('${item.id}')" class="p-1.5 bg-red-50 text-red-600 rounded">Del</button>
                         </div>
                     </td>
-                    <td class="px-3 py-4 font-bold text-gray-900">${item.q1 || '—'}</td>
-                    <td class="px-3 py-4 text-gray-600">${item.q2 || '—'}</td>
-                    <td class="px-3 py-4 text-gray-600">${item.q3 || '—'}</td>
-                    <td class="px-3 py-4 text-gray-600">${item.q4 || '—'}</td>
-                    <td class="px-3 py-4 text-gray-600">${item.q5 || '—'}</td>
-                    <td class="px-3 py-4 text-gray-600">${item.q6 || '—'}</td>
-                    <td class="px-3 py-4 text-gray-600">${item.q7 || '—'}</td>
-                    <td class="px-3 py-4 text-gray-600">${item.q8 || '—'}</td>
-                    <td class="px-3 py-4 text-gray-600">${item.q9 || '—'}</td>
-                    <td class="px-3 py-4 text-gray-600">${item.q10 || '—'}</td>
-                    <td class="px-3 py-4 text-gray-600">${item.q11 || '—'}</td>
-                    <td class="px-3 py-4 text-gray-600">${item.q12 || '—'}</td>
-                    <td class="px-3 py-4 text-gray-600">${item.q13 || '—'}</td>
-                    <td class="px-3 py-4 text-gray-600">${item.q14 || '—'}</td>
-                    <td class="px-3 py-4 text-blue-700 bg-blue-50/20 italic">${item.hr || '—'}</td>
+                    <td class="px-3 py-4 font-bold">${item.q1||'—'}</td>
+                    <td class="px-3 py-4">${item.q2||'—'}</td><td class="px-3 py-4">${item.q3||'—'}</td><td class="px-3 py-4">${item.q4||'—'}</td>
+                    <td class="px-3 py-4">${item.q5||'—'}</td><td class="px-3 py-4">${item.q6||'—'}</td><td class="px-3 py-4">${item.q7||'—'}</td>
+                    <td class="px-3 py-4">${item.q8||'—'}</td><td class="px-3 py-4">${item.q9||'—'}</td><td class="px-3 py-4">${item.q10||'—'}</td>
+                    <td class="px-3 py-4">${item.q11||'—'}</td><td class="px-3 py-4">${item.q12||'—'}</td><td class="px-3 py-4">${item.q13||'—'}</td>
+                    <td class="px-3 py-4">${item.q14||'—'}</td><td class="px-3 py-4 italic">${item.hr||'—'}</td>
                 `;
                 tbody.appendChild(row);
             });
         }
-
-        window.downloadExcel = () => {
-            if (gcData.length === 0) {
-                window.showToast("No data to export", "error");
-                return;
-            }
-            const header1 = ["General question", "", "", "", "", "Training Related Questions:", "", "", "", "Positive / Negative Feedback", "", "", "", "", "HR FEEDBACK:"];
-            const header2 = ["Name", "Tenure", "Shift", "Safety", "Support", "Join Tr.", "Mach Tr.", "Imp.", "Days", "Best", "Culture", "Problem", "Change", "Exp", "HR Remarks"];
-            const rows = gcData.map(item => [item.q1, item.q2, item.q3, item.q4, item.q5, item.q6, item.q7, item.q8, item.q9, item.q10, item.q11, item.q12, item.q13, item.q14, item.hr]);
-            const ws = XLSX.utils.aoa_to_sheet([header1, header2, ...rows]);
-            ws['!merges'] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: 4 } }, { s: { r: 0, c: 5 }, e: { r: 0, c: 8 } }, { s: { r: 0, c: 9 }, e: { r: 0, c: 13 } }];
-            const wb = XLSX.utils.book_new();
-            XLSX.utils.book_append_sheet(wb, ws, "GC Records");
-            XLSX.writeFile(wb, `GC_RECORDS_${new Date().toISOString().split('T')[0]}.xlsx`);
-        };
-
-        initAuth();
     </script>
 </head>
 
 <body class="min-h-screen pb-10">
-    <!-- Header -->
-    <header class="bg-white border-b border-gray-200 px-4 md:px-6 py-4 flex flex-col sm:flex-row justify-between items-center sticky top-0 z-50 gap-4 shadow-sm">
-        <div class="flex items-center gap-3 w-full sm:w-auto">
-            <div class="bg-blue-600 p-2 rounded-lg text-white shrink-0">
-                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
-            </div>
-            <h1 class="text-lg md:text-xl font-bold text-gray-800 uppercase tracking-tight truncate">GC INFORMATION</h1>
+    <header class="bg-white border-b px-4 md:px-6 py-4 flex flex-col sm:flex-row justify-between items-center sticky top-0 z-50 gap-4 shadow-sm">
+        <div class="flex items-center gap-3">
+            <div class="bg-blue-600 p-2 rounded-lg text-white">GC</div>
+            <h1 class="text-lg md:text-xl font-bold text-gray-800">GC INFORMATION</h1>
         </div>
         <div class="flex gap-2 w-full sm:w-auto">
-            <button onclick="prepareNewForm()" id="btn-show-form" class="hidden flex-1 sm:flex-none px-4 py-2.5 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg transition-all font-semibold text-sm">Add New Record</button>
-            <button onclick="toggleView('list')" id="btn-show-list" class="flex-1 sm:flex-none px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-all font-semibold text-sm shadow-sm">View Details</button>
+            <button onclick="prepareNewForm()" id="btn-show-form" class="hidden flex-1 px-4 py-2.5 bg-gray-100 text-gray-700 rounded-lg font-semibold text-sm">Add Record</button>
+            <button onclick="toggleView('list')" id="btn-show-list" class="flex-1 px-4 py-2.5 bg-blue-600 text-white rounded-lg font-semibold text-sm shadow-sm">View Details</button>
         </div>
     </header>
 
     <main class="max-w-6xl mx-auto p-4 md:p-6">
-        <!-- Form Section -->
-        <div id="form-container" class="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
-            <div class="flex border-b border-gray-200 bg-gray-50 overflow-x-auto no-scrollbar">
-                <button onclick="showSet(1)" id="tab-1" class="tab-btn min-w-[120px] flex-1 py-4 text-xs md:text-sm font-medium transition-all active border-r border-gray-100">Set 1: General</button>
-                <button onclick="showSet(2)" id="tab-2" class="tab-btn min-w-[120px] flex-1 py-4 text-xs md:text-sm font-medium transition-all text-gray-500 border-r border-gray-100">Set 2: Training</button>
-                <button onclick="showSet(3)" id="tab-3" class="tab-btn min-w-[120px] flex-1 py-4 text-xs md:text-sm font-medium transition-all text-gray-500">Set 3: Feedback</button>
+        <div id="form-container" class="bg-white rounded-2xl shadow-sm border overflow-hidden">
+            <div class="flex border-b bg-gray-50 overflow-x-auto no-scrollbar">
+                <button onclick="showSet(1)" id="tab-1" class="tab-btn min-w-[120px] flex-1 py-4 text-xs font-medium active">Set 1: General</button>
+                <button onclick="showSet(2)" id="tab-2" class="tab-btn min-w-[120px] flex-1 py-4 text-xs font-medium text-gray-500">Set 2: Training</button>
+                <button onclick="showSet(3)" id="tab-3" class="tab-btn min-w-[120px] flex-1 py-4 text-xs font-medium text-gray-500">Set 3: Feedback</button>
             </div>
 
             <form id="gc-form" class="p-5 md:p-8">
                 <input type="hidden" id="editing-id">
-                
                 <div id="set-1" class="form-section active space-y-6">
-                    <div class="flex items-center gap-2 mb-4">
-                        <span class="bg-blue-100 text-blue-700 w-8 h-8 rounded-full flex items-center justify-center font-bold">1</span>
-                        <h2 id="form-title-text" class="text-lg font-bold text-gray-800 uppercase text-sm tracking-wide">General Questions</h2>
+                    <h2 id="form-title-text" class="text-lg font-bold">General Questions</h2>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div><label class="text-sm font-semibold">Naam?</label><input type="text" id="q1" required></div>
+                        <div><label class="text-sm font-semibold">Time?</label><input type="text" id="q2"></div>
+                        <div><label class="text-sm font-semibold">Shift?</label><select id="q3"><option value="A">A</option><option value="B">B</option><option value="C">C</option></select></div>
+                        <div><label class="text-sm font-semibold">Safety?</label><select id="q4"><option value="Yes">Yes</option><option value="No">No</option></select></div>
+                        <div class="md:col-span-2"><label class="text-sm font-semibold">Support?</label><input type="text" id="q5"></div>
                     </div>
-                    <div class="grid grid-cols-1 md:grid-cols-2 gap-5 md:gap-6">
-                        <div><label class="text-sm font-semibold text-gray-600">Aapka naam kya hai?</label><input type="text" id="q1" placeholder="Full Name" required></div>
-                        <div><label class="text-sm font-semibold text-gray-600">Time in warehouse?</label><input type="text" id="q2" placeholder="e.g. 6 months"></div>
-                        <div><label class="text-sm font-semibold text-gray-600">Shift timing?</label><select id="q3"><option value="">Select Shift</option><option value="A Shift">A Shift</option><option value="B Shift">B Shift</option><option value="C Shift">C Shift</option><option value="General">General</option></select></div>
-                        <div><label class="text-sm font-semibold text-gray-600">Safety rules info given?</label><select id="q4"><option value="Yes">Yes</option><option value="No">No</option></select></div>
-                        <div class="md:col-span-2"><label class="text-sm font-semibold text-gray-600">Team support milta hai?</label><input type="text" id="q5" placeholder="Team behavior/support"></div>
-                    </div>
-                    <div class="flex justify-end pt-4"><button type="button" onclick="showSet(2)" class="w-full md:w-auto px-8 py-3 bg-blue-600 text-white rounded-xl font-bold">Continue to Training</button></div>
+                    <button type="button" onclick="showSet(2)" class="w-full md:w-auto px-8 py-3 bg-blue-600 text-white rounded-xl font-bold">Next</button>
                 </div>
 
                 <div id="set-2" class="form-section space-y-6">
-                    <div class="flex items-center gap-2 mb-4"><span class="bg-orange-100 text-orange-700 w-8 h-8 rounded-full flex items-center justify-center font-bold">2</span><h2 class="text-lg font-bold text-gray-800 uppercase text-sm tracking-wide">Training Questions</h2></div>
-                    <div class="grid grid-cols-1 md:grid-cols-2 gap-5 md:gap-6">
-                        <div><label class="text-sm font-semibold text-gray-600">Proper training at joining?</label><select id="q6"><option value="Yes">Yes</option><option value="No">No</option></select></div>
-                        <div><label class="text-sm font-semibold text-gray-600">Machines/Equipment training?</label><select id="q7"><option value="Yes">Yes</option><option value="No">No</option></select></div>
-                        <div><label class="text-sm font-semibold text-gray-600">Improvement suggestions?</label><textarea id="q8" rows="2"></textarea></div>
-                        <div><label class="text-sm font-semibold text-gray-600">Training duration (days)?</label><input type="text" id="q9"></div>
+                    <h2 class="text-lg font-bold">Training</h2>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div><label class="text-sm font-semibold">Joining Tr?</label><select id="q6"><option value="Yes">Yes</option><option value="No">No</option></select></div>
+                        <div><label class="text-sm font-semibold">Mach Tr?</label><select id="q7"><option value="Yes">Yes</option><option value="No">No</option></select></div>
+                        <div><label class="text-sm font-semibold">Imp?</label><textarea id="q8"></textarea></div>
+                        <div><label class="text-sm font-semibold">Days?</label><input type="text" id="q9"></div>
                     </div>
-                    <div class="flex flex-col-reverse md:flex-row justify-between gap-3 pt-4"><button type="button" onclick="showSet(1)" class="px-8 py-3 bg-gray-100 text-gray-700 rounded-xl font-bold">Back</button><button type="button" onclick="showSet(3)" class="px-8 py-3 bg-blue-600 text-white rounded-xl font-bold">Continue to Feedback</button></div>
+                    <div class="flex justify-between"><button type="button" onclick="showSet(1)" class="px-8 py-3 bg-gray-100 rounded-xl">Back</button><button type="button" onclick="showSet(3)" class="px-8 py-3 bg-blue-600 text-white rounded-xl">Next</button></div>
                 </div>
 
                 <div id="set-3" class="form-section space-y-6">
-                    <div class="flex items-center gap-2 mb-4"><span class="bg-green-100 text-green-700 w-8 h-8 rounded-full flex items-center justify-center font-bold">3</span><h2 class="text-lg font-bold text-gray-800 uppercase text-sm tracking-wide">Final Feedback</h2></div>
-                    <div class="grid grid-cols-1 gap-5">
-                        <div><label class="text-sm font-semibold text-gray-600">Best thing about warehouse?</label><input type="text" id="q10"></div>
-                        <div><label class="text-sm font-semibold text-gray-600">Problem faced?</label><textarea id="q12" rows="2"></textarea></div>
-                        <div class="mt-4 p-5 bg-blue-50 border border-blue-100 rounded-2xl"><label class="block text-xs font-bold text-blue-800 mb-2 uppercase tracking-widest">FINAL HR FEEDBACK</label><textarea id="hr_feedback" rows="3" class="bg-white border-blue-200"></textarea></div>
+                    <h2 class="text-lg font-bold">Feedback</h2>
+                    <div class="space-y-4">
+                        <div><label class="text-sm font-semibold">Best thing?</label><input type="text" id="q10"></div>
+                        <div><label class="text-sm font-semibold">Culture?</label><input type="text" id="q11"></div>
+                        <div><label class="text-sm font-semibold">Problem?</label><textarea id="q12"></textarea></div>
+                        <div><label class="text-sm font-semibold">Change?</label><input type="text" id="q13"></div>
+                        <div><label class="text-sm font-semibold">Exp?</label><textarea id="q14"></textarea></div>
+                        <div class="p-4 bg-blue-50 rounded-xl"><label class="font-bold block">HR Feedback</label><textarea id="hr_feedback" class="bg-white"></textarea></div>
                     </div>
-                    <div class="flex flex-col-reverse md:flex-row justify-between gap-3 pt-6"><button type="button" onclick="showSet(2)" class="px-8 py-3 bg-gray-100 text-gray-700 rounded-xl font-bold">Back</button><button type="submit" id="submit-btn" class="px-10 py-4 bg-green-600 hover:bg-green-700 text-white rounded-xl font-black text-lg transition-all shadow-xl">Submit Records</button></div>
+                    <div class="flex justify-between"><button type="button" onclick="showSet(2)" class="px-8 py-3 bg-gray-100 rounded-xl">Back</button><button type="submit" id="submit-btn" class="px-8 py-3 bg-green-600 text-white rounded-xl font-bold">Submit</button></div>
                 </div>
             </form>
         </div>
 
-        <!-- List Section -->
         <div id="list-container" class="hidden">
-            <div class="bg-white rounded-2xl shadow-sm border border-gray-200 p-4 md:p-6">
-                <div class="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-4">
-                    <div><h2 class="text-xl font-black text-gray-800">GC RECORDS</h2><p class="text-sm text-gray-500">History of entries</p></div>
-                    <div class="flex flex-wrap gap-2 w-full md:w-auto">
-                        <button onclick="prepareNewForm()" class="flex-1 md:flex-none flex items-center justify-center gap-2 px-4 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold transition-all shadow-lg">
-                            <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-                            Fill New Record
-                        </button>
-                        <button onclick="downloadExcel()" class="flex-1 md:flex-none flex items-center justify-center gap-2 px-4 py-3 bg-green-600 hover:bg-green-700 text-white rounded-xl font-bold transition-all shadow-lg">
-                            <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-                            Export
-                        </button>
+            <div class="bg-white rounded-2xl shadow-sm border p-4 md:p-6">
+                <div class="flex justify-between items-center mb-6">
+                    <h2 class="text-xl font-bold">RECORDS</h2>
+                    <div class="flex gap-2">
+                        <button onclick="prepareNewForm()" class="px-4 py-2 bg-blue-600 text-white rounded-lg font-bold text-sm">Fill New</button>
+                        <button onclick="downloadExcel()" class="px-4 py-2 bg-green-600 text-white rounded-lg font-bold text-sm">Export</button>
                     </div>
                 </div>
-
-                <div class="overflow-x-auto rounded-xl border border-gray-100 custom-scrollbar">
+                <div class="overflow-x-auto rounded-xl border custom-scrollbar">
                     <table class="min-w-full divide-y divide-gray-200 text-xs">
                         <thead class="bg-gray-50">
-                            <tr><th class="px-3 py-3 border-r">Manage</th><th colspan="5" class="px-3 py-3 border-r bg-blue-50/30">General</th><th colspan="4" class="px-3 py-3 border-r bg-orange-50/30">Training</th><th colspan="4" class="px-3 py-3 bg-green-50/30">Feedback</th><th>HR</th></tr>
+                            <tr><th class="px-3 py-3 border-r">Actions</th><th colspan="5" class="px-3 py-3 border-r">General</th><th colspan="4" class="px-3 py-3 border-r">Training</th><th colspan="5" class="px-3 py-3">Feedback</th></tr>
                         </thead>
                         <tbody id="table-body" class="bg-white divide-y divide-gray-100"></tbody>
                     </table>
@@ -364,30 +330,27 @@
         </div>
     </main>
 
-    <!-- Components -->
-    <div id="toast" class="fixed bottom-6 left-1/2 -translate-x-1/2 md:translate-x-0 md:left-auto md:right-6 translate-y-20 opacity-0 bg-gray-900 text-white px-6 py-4 rounded-2xl shadow-2xl transition-all duration-300 pointer-events-none flex items-center gap-3 z-[100] w-[90%] md:w-auto">
-        <div id="toast-icon-bg" class="bg-green-500 rounded-full p-1.5"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></div>
-        <span id="toast-msg" class="font-bold text-sm">Success</span>
+    <div id="toast" class="fixed bottom-6 left-1/2 -translate-x-1/2 md:translate-x-0 md:left-auto md:right-6 translate-y-20 opacity-0 bg-gray-900 text-white px-6 py-4 rounded-2xl shadow-2xl transition-all z-[100]">
+        <div id="toast-icon-bg" class="inline-block rounded-full p-1 mr-2 bg-green-500">✓</div>
+        <span id="toast-msg">Success</span>
     </div>
 
     <div id="confirm-modal" class="fixed inset-0 bg-black/50 hidden z-[101] flex items-center justify-center p-4">
-        <div class="bg-white rounded-2xl p-6 max-w-sm w-full shadow-2xl scale-95 transition-all">
+        <div class="bg-white rounded-2xl p-6 max-w-sm w-full">
             <h3 id="modal-title" class="text-lg font-bold mb-2">Confirm</h3>
             <p id="modal-desc" class="text-gray-500 text-sm mb-6"></p>
             <div class="flex gap-3">
-                <button onclick="closeModal()" class="flex-1 py-3 bg-gray-100 rounded-xl font-bold">Cancel</button>
-                <button id="modal-confirm-btn" class="flex-1 py-3 bg-red-600 text-white rounded-xl font-bold">Yes</button>
+                <button onclick="closeModal()" class="flex-1 py-3 bg-gray-100 rounded-xl">Cancel</button>
+                <button id="modal-confirm-btn" class="flex-1 py-3 bg-red-600 text-white rounded-xl">Yes</button>
             </div>
         </div>
     </div>
 
     <script>
-        // Simple non-module helpers for modal/toast
         window.showToast = (msg, type = "success") => {
             const toast = document.getElementById('toast');
-            const bg = document.getElementById('toast-icon-bg');
             document.getElementById('toast-msg').innerText = msg;
-            bg.className = type === "error" ? 'bg-red-500 rounded-full p-1.5' : 'bg-green-500 rounded-full p-1.5';
+            document.getElementById('toast-icon-bg').className = type === "error" ? 'inline-block rounded-full p-1 mr-2 bg-red-500' : 'inline-block rounded-full p-1 mr-2 bg-green-500';
             toast.classList.remove('translate-y-20', 'opacity-0');
             toast.classList.add('translate-y-0', 'opacity-100');
             setTimeout(() => { toast.classList.add('translate-y-20', 'opacity-0'); toast.classList.remove('translate-y-0', 'opacity-100'); }, 3000);
