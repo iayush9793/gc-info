@@ -26,16 +26,35 @@
     <!-- Firebase Logic -->
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-        import { getAuth, onAuthStateChanged, signInAnonymously, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getAuth, onAuthStateChanged, signInAnonymously } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
         import { getFirestore, collection, addDoc, updateDoc, deleteDoc, doc, onSnapshot } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
-        // --- 1. ATTACH UI FUNCTIONS TO WINDOW IMMEDIATELY ---
-        // This ensures buttons work even if Firebase is still loading
+        // --- 1. FIREBASE CONFIGURATION (UPDATED) ---
+        const firebaseConfig = {
+            apiKey: "AIzaSyDG373JsaEW5P-J1LxXIoXc7qfFvzJd4uI",
+            authDomain: "gcdash-245e6.firebaseapp.com",
+            projectId: "gcdash-245e6",
+            storageBucket: "gcdash-245e6.firebasestorage.app",
+            messagingSenderId: "441547365367",
+            appId: "1:441547365367:web:cb2f7e5b5dc83f800a6cf2",
+            measurementId: "G-N74YRRH7WE"
+        };
+
+        const appId = 'gcdash-v1'; 
+        const app = initializeApp(firebaseConfig);
+        const auth = getAuth(app);
+        const db = getFirestore(app);
+        const recordsCol = collection(db, 'artifacts', appId, 'public', 'data', 'gc_records');
+
+        let gcData = [];
+        let currentUser = null;
+
+        // --- GLOBAL UI FUNCTIONS ---
         window.prepareNewForm = () => {
             const form = document.getElementById('gc-form');
             if (form) form.reset();
             document.getElementById('editing-id').value = '';
-            document.getElementById('form-title-text').innerText = 'General Questions';
+            document.getElementById('form-title-text').innerText = 'Set 1: General Questions';
             document.getElementById('submit-btn').innerText = 'Submit Records';
             window.toggleView('form');
             window.showSet(1);
@@ -72,151 +91,117 @@
             }
         };
 
-        // --- 2. FIREBASE INITIALIZATION ---
-        let firebaseConfig = {};
-        let appId = 'default-app';
-        let initialAuthToken = null;
-
-        try {
-            // Check if environment variables exist
-            if (typeof __firebase_config !== 'undefined') {
-                firebaseConfig = typeof __firebase_config === 'string' ? JSON.parse(__firebase_config) : __firebase_config;
-            }
-            if (typeof __app_id !== 'undefined') appId = __app_id;
-            if (typeof __initial_auth_token !== 'undefined') initialAuthToken = __initial_auth_token;
-        } catch (e) {
-            console.warn("Config parsing error - using default/empty config", e);
-        }
-
-        // Only initialize if config is not empty
-        if (Object.keys(firebaseConfig).length > 0) {
-            const app = initializeApp(firebaseConfig);
-            const auth = getAuth(app);
-            const db = getFirestore(app);
-            const recordsCol = collection(db, 'artifacts', appId, 'public', 'data', 'gc_records');
-
-            let gcData = [];
-            let currentUser = null;
-
-            async function initAuth() {
-                try {
-                    if (initialAuthToken) {
-                        await signInWithCustomToken(auth, initialAuthToken);
-                    } else {
-                        await signInAnonymously(auth);
-                    }
-                } catch (error) {
-                    console.error("Auth failed", error);
-                }
-            }
-
-            onAuthStateChanged(auth, (user) => {
-                currentUser = user;
-                if (user) {
-                    onSnapshot(recordsCol, (snapshot) => {
-                        gcData = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id }));
-                        renderTable(gcData);
-                    });
-                }
-            });
-
-            document.getElementById('gc-form').addEventListener('submit', async (e) => {
-                e.preventDefault();
-                if (!currentUser) {
-                    window.showToast("Authenticating...", "error");
-                    await initAuth();
-                    if (!currentUser) return;
-                }
-
-                const recordId = document.getElementById('editing-id').value;
-                const data = {
-                    q1: document.getElementById('q1').value,
-                    q2: document.getElementById('q2').value,
-                    q3: document.getElementById('q3').value,
-                    q4: document.getElementById('q4').value,
-                    q5: document.getElementById('q5').value,
-                    q6: document.getElementById('q6').value,
-                    q7: document.getElementById('q7').value,
-                    q8: document.getElementById('q8').value,
-                    q9: document.getElementById('q9').value,
-                    q10: document.getElementById('q10').value,
-                    q11: document.getElementById('q11').value,
-                    q12: document.getElementById('q12').value,
-                    q13: document.getElementById('q13').value,
-                    q14: document.getElementById('q14').value,
-                    hr: document.getElementById('hr_feedback').value,
-                    updatedAt: Date.now()
-                };
-
-                try {
-                    if (recordId) {
-                        await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'gc_records', recordId), data);
-                        window.showToast("Record updated!", "success");
-                    } else {
-                        data.createdAt = Date.now();
-                        await addDoc(recordsCol, data);
-                        window.showToast("Record saved!", "success");
-                    }
-                    window.prepareNewForm();
-                    window.toggleView('list');
-                } catch (err) {
-                    window.showToast("Save failed", "error");
-                }
-            });
-
-            window.deleteRecord = (id) => {
-                window.openModal("Delete Record?", "Delete this entry permanently?", async () => {
-                    try {
-                        await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'gc_records', id));
-                        window.showToast("Deleted", "error");
-                        window.closeModal();
-                    } catch (err) { window.showToast("Failed", "error"); }
+        // --- DATABASE OPS ---
+        onAuthStateChanged(auth, async (user) => {
+            currentUser = user;
+            if (!user) {
+                await signInAnonymously(auth);
+            } else {
+                onSnapshot(recordsCol, (snapshot) => {
+                    gcData = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id }));
+                    renderTable(gcData);
                 });
+            }
+        });
+
+        document.getElementById('gc-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const recordId = document.getElementById('editing-id').value;
+            const data = {
+                q1: document.getElementById('q1').value,
+                q2: document.getElementById('q2').value,
+                q3: document.getElementById('q3').value,
+                q4: document.getElementById('q4').value,
+                q5: document.getElementById('q5').value,
+                q6: document.getElementById('q6').value,
+                q7: document.getElementById('q7').value,
+                q8: document.getElementById('q8').value,
+                q9: document.getElementById('q9').value,
+                q10: document.getElementById('q10').value,
+                q11: document.getElementById('q11').value,
+                q12: document.getElementById('q12').value,
+                q13: document.getElementById('q13').value,
+                q14: document.getElementById('q14').value,
+                hr: document.getElementById('hr_feedback').value,
+                updatedAt: Date.now()
             };
 
-            window.editRecord = (id) => {
-                const record = gcData.find(r => r.id === id);
-                if (!record) return;
-                document.getElementById('editing-id').value = record.id;
-                document.getElementById('q1').value = record.q1 || '';
-                document.getElementById('q2').value = record.q2 || '';
-                document.getElementById('q3').value = record.q3 || '';
-                document.getElementById('q4').value = record.q4 || '';
-                document.getElementById('q5').value = record.q5 || '';
-                document.getElementById('q6').value = record.q6 || '';
-                document.getElementById('q7').value = record.q7 || '';
-                document.getElementById('q8').value = record.q8 || '';
-                document.getElementById('q9').value = record.q9 || '';
-                document.getElementById('q10').value = record.q10 || '';
-                document.getElementById('q11').value = record.q11 || '';
-                document.getElementById('q12').value = record.q12 || '';
-                document.getElementById('q13').value = record.q13 || '';
-                document.getElementById('q14').value = record.q14 || '';
-                document.getElementById('hr_feedback').value = record.hr || '';
-                document.getElementById('form-title-text').innerText = 'Updating...';
-                document.getElementById('submit-btn').innerText = 'Update Information';
-                window.toggleView('form');
-                window.showSet(1);
-            };
+            try {
+                if (recordId) {
+                    await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'gc_records', recordId), data);
+                    window.showToast("Record updated!", "success");
+                } else {
+                    data.createdAt = Date.now();
+                    await addDoc(recordsCol, data);
+                    window.showToast("Record saved!", "success");
+                }
+                window.prepareNewForm();
+                window.toggleView('list');
+            } catch (err) {
+                window.showToast("Save failed", "error");
+            }
+        });
 
-            window.downloadExcel = () => {
-                if (!gcData.length) return window.showToast("No data", "error");
-                const header1 = ["General", "", "", "", "", "Training", "", "", "", "Feedback", "", "", "", "", "HR"];
-                const header2 = ["Name", "Tenure", "Shift", "Safety", "Support", "Join", "Mach", "Imp", "Days", "Best", "Culture", "Prob", "Chg", "Exp", "HR"];
-                const rows = gcData.map(i => [i.q1, i.q2, i.q3, i.q4, i.q5, i.q6, i.q7, i.q8, i.q9, i.q10, i.q11, i.q12, i.q13, i.q14, i.hr]);
-                const ws = XLSX.utils.aoa_to_sheet([header1, header2, ...rows]);
-                ws['!merges'] = [{s:{r:0,c:0},e:{r:0,c:4}},{s:{r:0,c:5},e:{r:0,c:8}},{s:{r:0,c:9},e:{r:0,c:13}}];
-                const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, "Records");
-                XLSX.writeFile(wb, "GC_RECORDS.xlsx");
-            };
-
-            initAuth();
-        } else {
-            console.error("FIREBASE CONFIG MISSING. Hosting on Vercel requires a valid config.");
-            window.addEventListener('load', () => {
-                window.showToast("Database not configured", "error");
+        window.deleteRecord = (id) => {
+            window.openModal("Delete Record?", "Delete this employee entry permanently?", async () => {
+                try {
+                    await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'gc_records', id));
+                    window.showToast("Deleted", "error");
+                    window.closeModal();
+                } catch (err) { window.showToast("Failed", "error"); }
             });
-        }
+        };
+
+        window.editRecord = (id) => {
+            const record = gcData.find(r => r.id === id);
+            if (!record) return;
+            document.getElementById('editing-id').value = record.id;
+            document.getElementById('q1').value = record.q1 || '';
+            document.getElementById('q2').value = record.q2 || '';
+            document.getElementById('q3').value = record.q3 || '';
+            document.getElementById('q4').value = record.q4 || '';
+            document.getElementById('q5').value = record.q5 || '';
+            document.getElementById('q6').value = record.q6 || '';
+            document.getElementById('q7').value = record.q7 || '';
+            document.getElementById('q8').value = record.q8 || '';
+            document.getElementById('q9').value = record.q9 || '';
+            document.getElementById('q10').value = record.q10 || '';
+            document.getElementById('q11').value = record.q11 || '';
+            document.getElementById('q12').value = record.q12 || '';
+            document.getElementById('q13').value = record.q13 || '';
+            document.getElementById('q14').value = record.q14 || '';
+            document.getElementById('hr_feedback').value = record.hr || '';
+            document.getElementById('form-title-text').innerText = 'Updating Record...';
+            document.getElementById('submit-btn').innerText = 'Update Information';
+            window.toggleView('form');
+            window.showSet(1);
+        };
+
+        window.downloadExcel = () => {
+            if (!gcData.length) return window.showToast("No data", "error");
+            const header1 = ["General question", "", "", "", "", "Training Related Questions:", "", "", "", "Positive / Negative Feedback", "", "", "", "", "HR FEEDBACK:"];
+            const header2 = [
+                "Aapka naam kya hai?", 
+                "Aap kitne time se warehouse me kaam kar", 
+                "Aapki shift timing kya hoti hai?", 
+                "Kya aapko safety rules ke baare me information", 
+                "Aapko team support milta hai ya nahi?", 
+                "Kya joining ke time aapko proper training", 
+                "Kya aapko machines/equip ment use karna", 
+                "Aapke according training me kya improvement", 
+                "Training kitne din ki thi?", 
+                "Warehouse ki sabse achhi cheez kya lagti", 
+                "Aapko yaha ka work culture kaisa lagta hai?", 
+                "Aapko kaam karte time sabse zyada problem", 
+                "Agar aapko koi ek change karna ho warehouse", 
+                "Overall aapka experience positive hai ya"
+            ];
+            const rows = gcData.map(i => [i.q1, i.q2, i.q3, i.q4, i.q5, i.q6, i.q7, i.q8, i.q9, i.q10, i.q11, i.q12, i.q13, i.q14, i.hr]);
+            const ws = XLSX.utils.aoa_to_sheet([header1, header2, ...rows]);
+            ws['!merges'] = [{s:{r:0,c:0},e:{r:0,c:4}},{s:{r:0,c:5},e:{r:0,c:8}},{s:{r:0,c:9},e:{r:0,c:13}}];
+            const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, "GC Records");
+            XLSX.writeFile(wb, "GC_RECORDS.xlsx");
+        };
 
         function renderTable(data) {
             const tbody = document.getElementById('table-body');
@@ -229,18 +214,11 @@
                 const row = document.createElement('tr');
                 row.className = "divide-x divide-gray-100 hover:bg-blue-50/20";
                 row.innerHTML = `
-                    <td class="px-3 py-4 text-center whitespace-nowrap">
-                        <div class="flex gap-2 justify-center">
-                            <button onclick="editRecord('${item.id}')" class="p-1.5 bg-blue-50 text-blue-600 rounded">Edit</button>
-                            <button onclick="deleteRecord('${item.id}')" class="p-1.5 bg-red-50 text-red-600 rounded">Del</button>
-                        </div>
-                    </td>
-                    <td class="px-3 py-4 font-bold">${item.q1||'—'}</td>
-                    <td class="px-3 py-4">${item.q2||'—'}</td><td class="px-3 py-4">${item.q3||'—'}</td><td class="px-3 py-4">${item.q4||'—'}</td>
-                    <td class="px-3 py-4">${item.q5||'—'}</td><td class="px-3 py-4">${item.q6||'—'}</td><td class="px-3 py-4">${item.q7||'—'}</td>
-                    <td class="px-3 py-4">${item.q8||'—'}</td><td class="px-3 py-4">${item.q9||'—'}</td><td class="px-3 py-4">${item.q10||'—'}</td>
-                    <td class="px-3 py-4">${item.q11||'—'}</td><td class="px-3 py-4">${item.q12||'—'}</td><td class="px-3 py-4">${item.q13||'—'}</td>
-                    <td class="px-3 py-4">${item.q14||'—'}</td><td class="px-3 py-4 italic">${item.hr||'—'}</td>
+                    <td class="px-3 py-4 text-center whitespace-nowrap"><div class="flex gap-2 justify-center">
+                        <button onclick="editRecord('${item.id}')" class="p-1.5 bg-blue-50 text-blue-600 rounded">Edit</button>
+                        <button onclick="deleteRecord('${item.id}')" class="p-1.5 bg-red-50 text-red-600 rounded">Del</button>
+                    </div></td>
+                    <td class="px-3 py-4 font-bold">${item.q1||'—'}</td><td class="px-3 py-4">${item.q2||'—'}</td><td class="px-3 py-4">${item.q3||'—'}</td><td class="px-3 py-4">${item.q4||'—'}</td><td class="px-3 py-4">${item.q5||'—'}</td><td class="px-3 py-4">${item.q6||'—'}</td><td class="px-3 py-4">${item.q7||'—'}</td><td class="px-3 py-4">${item.q8||'—'}</td><td class="px-3 py-4">${item.q9||'—'}</td><td class="px-3 py-4">${item.q10||'—'}</td><td class="px-3 py-4">${item.q11||'—'}</td><td class="px-3 py-4">${item.q12||'—'}</td><td class="px-3 py-4">${item.q13||'—'}</td><td class="px-3 py-4">${item.q14||'—'}</td><td class="px-3 py-4 italic text-blue-800">${item.hr||'—'}</td>
                 `;
                 tbody.appendChild(row);
             });
@@ -251,12 +229,12 @@
 <body class="min-h-screen pb-10">
     <header class="bg-white border-b px-4 md:px-6 py-4 flex flex-col sm:flex-row justify-between items-center sticky top-0 z-50 gap-4 shadow-sm">
         <div class="flex items-center gap-3">
-            <div class="bg-blue-600 p-2 rounded-lg text-white">GC</div>
+            <div class="bg-blue-600 p-2 rounded-lg text-white font-bold">GC</div>
             <h1 class="text-lg md:text-xl font-bold text-gray-800">GC INFORMATION</h1>
         </div>
         <div class="flex gap-2 w-full sm:w-auto">
-            <button onclick="prepareNewForm()" id="btn-show-form" class="hidden flex-1 px-4 py-2.5 bg-gray-100 text-gray-700 rounded-lg font-semibold text-sm">Add Record</button>
-            <button onclick="toggleView('list')" id="btn-show-list" class="flex-1 px-4 py-2.5 bg-blue-600 text-white rounded-lg font-semibold text-sm shadow-sm">View Details</button>
+            <button onclick="prepareNewForm()" id="btn-show-form" class="hidden flex-1 px-4 py-2.5 bg-gray-100 text-gray-700 rounded-lg font-semibold text-sm">Add New Record</button>
+            <button onclick="toggleView('list')" id="btn-show-list" class="flex-1 px-4 py-2.5 bg-blue-600 text-white rounded-lg font-semibold text-sm shadow-sm">View Details of GC</button>
         </div>
     </header>
 
@@ -270,57 +248,61 @@
 
             <form id="gc-form" class="p-5 md:p-8">
                 <input type="hidden" id="editing-id">
+                
+                <!-- Set 1 -->
                 <div id="set-1" class="form-section active space-y-6">
-                    <h2 id="form-title-text" class="text-lg font-bold">General Questions</h2>
+                    <h2 id="form-title-text" class="text-lg font-bold text-gray-800">General question</h2>
                     <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div><label class="text-sm font-semibold">Naam?</label><input type="text" id="q1" required></div>
-                        <div><label class="text-sm font-semibold">Time?</label><input type="text" id="q2"></div>
-                        <div><label class="text-sm font-semibold">Shift?</label><select id="q3"><option value="A">A</option><option value="B">B</option><option value="C">C</option></select></div>
-                        <div><label class="text-sm font-semibold">Safety?</label><select id="q4"><option value="Yes">Yes</option><option value="No">No</option></select></div>
-                        <div class="md:col-span-2"><label class="text-sm font-semibold">Support?</label><input type="text" id="q5"></div>
+                        <div><label class="text-sm font-semibold">1- Aapka naam kya hai?</label><input type="text" id="q1" placeholder="Enter name" required></div>
+                        <div><label class="text-sm font-semibold">2- Aap kitne time se warehouse me kaam kar rahe ho?</label><input type="text" id="q2"></div>
+                        <div><label class="text-sm font-semibold">3- Aapki shift timing kya hoti hai?</label><input type="text" id="q3"></div>
+                        <div><label class="text-sm font-semibold">4- Kya aapko safety rules ke baare me information di gayi hai?</label><select id="q4"><option value="Yes">Yes</option><option value="No">No</option></select></div>
+                        <div class="md:col-span-2"><label class="text-sm font-semibold">5- Aapko team support milta hai ya nahi?</label><input type="text" id="q5"></div>
                     </div>
-                    <button type="button" onclick="showSet(2)" class="w-full md:w-auto px-8 py-3 bg-blue-600 text-white rounded-xl font-bold">Next</button>
+                    <button type="button" onclick="showSet(2)" class="w-full md:w-auto px-10 py-3 bg-blue-600 text-white rounded-xl font-bold">Continue</button>
                 </div>
 
+                <!-- Set 2 -->
                 <div id="set-2" class="form-section space-y-6">
-                    <h2 class="text-lg font-bold">Training</h2>
+                    <h2 class="text-lg font-bold text-gray-800">Training Related Questions:</h2>
                     <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div><label class="text-sm font-semibold">Joining Tr?</label><select id="q6"><option value="Yes">Yes</option><option value="No">No</option></select></div>
-                        <div><label class="text-sm font-semibold">Mach Tr?</label><select id="q7"><option value="Yes">Yes</option><option value="No">No</option></select></div>
-                        <div><label class="text-sm font-semibold">Imp?</label><textarea id="q8"></textarea></div>
-                        <div><label class="text-sm font-semibold">Days?</label><input type="text" id="q9"></div>
+                        <div><label class="text-sm font-semibold">1- Kya joining ke time aapko proper training di gayi thi?</label><select id="q6"><option value="Yes">Yes</option><option value="No">No</option></select></div>
+                        <div><label class="text-sm font-semibold">2- Kya aapko machines/equipment use karna sikhaya gaya?</label><select id="q7"><option value="Yes">Yes</option><option value="No">No</option></select></div>
+                        <div><label class="text-sm font-semibold">3- Aapke according training me kya improvement honi chahiye?</label><textarea id="q8"></textarea></div>
+                        <div><label class="text-sm font-semibold">4- Training kitne din ki thi?</label><input type="text" id="q9"></div>
                     </div>
-                    <div class="flex justify-between"><button type="button" onclick="showSet(1)" class="px-8 py-3 bg-gray-100 rounded-xl">Back</button><button type="button" onclick="showSet(3)" class="px-8 py-3 bg-blue-600 text-white rounded-xl">Next</button></div>
+                    <div class="flex justify-between"><button type="button" onclick="showSet(1)" class="px-8 py-3 bg-gray-100 rounded-xl">Back</button><button type="button" onclick="showSet(3)" class="px-8 py-3 bg-blue-600 text-white rounded-xl font-bold">Continue</button></div>
                 </div>
 
+                <!-- Set 3 -->
                 <div id="set-3" class="form-section space-y-6">
-                    <h2 class="text-lg font-bold">Feedback</h2>
+                    <h2 class="text-lg font-bold text-gray-800">Positive / Negative Feedback</h2>
                     <div class="space-y-4">
-                        <div><label class="text-sm font-semibold">Best thing?</label><input type="text" id="q10"></div>
-                        <div><label class="text-sm font-semibold">Culture?</label><input type="text" id="q11"></div>
-                        <div><label class="text-sm font-semibold">Problem?</label><textarea id="q12"></textarea></div>
-                        <div><label class="text-sm font-semibold">Change?</label><input type="text" id="q13"></div>
-                        <div><label class="text-sm font-semibold">Exp?</label><textarea id="q14"></textarea></div>
-                        <div class="p-4 bg-blue-50 rounded-xl"><label class="font-bold block">HR Feedback</label><textarea id="hr_feedback" class="bg-white"></textarea></div>
+                        <div><label class="text-sm font-semibold">1- Warehouse ki sabse achhi cheez kya lagti hai?</label><input type="text" id="q10"></div>
+                        <div><label class="text-sm font-semibold">2- Aapko yaha ka work culture kaisa lagta hai?</label><input type="text" id="q11"></div>
+                        <div><label class="text-sm font-semibold">3- Aapko kaam karte time sabse zyada problem kis cheez me hoti hai?</label><textarea id="q12"></textarea></div>
+                        <div><label class="text-sm font-semibold">4- Agar aapko koi ek change karna ho warehouse me, toh kya karoge?</label><input type="text" id="q13"></div>
+                        <div><label class="text-sm font-semibold">5- Overall aapka experience positive hai ya negative? Kyu?</label><textarea id="q14"></textarea></div>
+                        <div class="p-5 bg-blue-50 border rounded-2xl"><label class="font-bold block text-blue-900">HR FEEDBACK:</label><textarea id="hr_feedback" class="bg-white border-blue-200"></textarea></div>
                     </div>
-                    <div class="flex justify-between"><button type="button" onclick="showSet(2)" class="px-8 py-3 bg-gray-100 rounded-xl">Back</button><button type="submit" id="submit-btn" class="px-8 py-3 bg-green-600 text-white rounded-xl font-bold">Submit</button></div>
+                    <div class="flex justify-between mt-6"><button type="button" onclick="showSet(2)" class="px-8 py-3 bg-gray-100 rounded-xl font-bold">Back</button><button type="submit" id="submit-btn" class="px-12 py-4 bg-green-600 text-white rounded-xl font-black text-lg shadow-xl active:scale-95 transition-all">SUBMIT RECORD</button></div>
                 </div>
             </form>
         </div>
 
         <div id="list-container" class="hidden">
             <div class="bg-white rounded-2xl shadow-sm border p-4 md:p-6">
-                <div class="flex justify-between items-center mb-6">
-                    <h2 class="text-xl font-bold">RECORDS</h2>
-                    <div class="flex gap-2">
-                        <button onclick="prepareNewForm()" class="px-4 py-2 bg-blue-600 text-white rounded-lg font-bold text-sm">Fill New</button>
-                        <button onclick="downloadExcel()" class="px-4 py-2 bg-green-600 text-white rounded-lg font-bold text-sm">Export</button>
+                <div class="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-4">
+                    <div><h2 class="text-xl font-black text-gray-800 uppercase">GC Records</h2><p class="text-sm text-gray-500 italic">History of employee interviews</p></div>
+                    <div class="flex gap-2 w-full md:w-auto">
+                        <button onclick="prepareNewForm()" class="flex-1 px-4 py-3 bg-blue-600 text-white rounded-xl font-bold text-sm">Fill New Record</button>
+                        <button onclick="downloadExcel()" class="flex-1 px-4 py-3 bg-green-600 text-white rounded-xl font-bold text-sm">Download Excel</button>
                     </div>
                 </div>
                 <div class="overflow-x-auto rounded-xl border custom-scrollbar">
-                    <table class="min-w-full divide-y divide-gray-200 text-xs">
+                    <table class="min-w-full divide-y divide-gray-200 text-[10px]">
                         <thead class="bg-gray-50">
-                            <tr><th class="px-3 py-3 border-r">Actions</th><th colspan="5" class="px-3 py-3 border-r">General</th><th colspan="4" class="px-3 py-3 border-r">Training</th><th colspan="5" class="px-3 py-3">Feedback</th></tr>
+                            <tr><th class="px-2 py-3 border-r bg-gray-200">Actions</th><th colspan="5" class="px-2 py-3 border-r bg-blue-100">General question</th><th colspan="4" class="px-2 py-3 border-r bg-orange-100">Training Related Questions:</th><th colspan="5" class="px-2 py-3 bg-green-100">Positive / Negative Feedback</th><th class="bg-gray-100">HR FEEDBACK:</th></tr>
                         </thead>
                         <tbody id="table-body" class="bg-white divide-y divide-gray-100"></tbody>
                     </table>
@@ -337,12 +319,9 @@
 
     <div id="confirm-modal" class="fixed inset-0 bg-black/50 hidden z-[101] flex items-center justify-center p-4">
         <div class="bg-white rounded-2xl p-6 max-w-sm w-full">
-            <h3 id="modal-title" class="text-lg font-bold mb-2">Confirm</h3>
+            <h3 id="modal-title" class="text-lg font-bold mb-2">Confirm Action</h3>
             <p id="modal-desc" class="text-gray-500 text-sm mb-6"></p>
-            <div class="flex gap-3">
-                <button onclick="closeModal()" class="flex-1 py-3 bg-gray-100 rounded-xl">Cancel</button>
-                <button id="modal-confirm-btn" class="flex-1 py-3 bg-red-600 text-white rounded-xl">Yes</button>
-            </div>
+            <div class="flex gap-3"><button onclick="closeModal()" class="flex-1 py-3 bg-gray-100 rounded-xl">Cancel</button><button id="modal-confirm-btn" class="flex-1 py-3 bg-red-600 text-white rounded-xl font-bold">Confirm</button></div>
         </div>
     </div>
 
