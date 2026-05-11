@@ -8,34 +8,54 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     
-    <!-- Firebase Imports -->
+    <style>
+        body { font-family: 'Inter', sans-serif; background-color: #f8fafc; -webkit-tap-highlight-color: transparent; }
+        .form-section { display: none; }
+        .form-section.active { display: block; }
+        .tab-btn.active { border-bottom: 3px solid #2563eb; color: #2563eb; font-weight: 700; background-color: white; }
+        input, textarea, select { width: 100%; padding: 0.75rem; border: 1px solid #d1d5db; border-radius: 0.5rem; margin-top: 0.35rem; outline: none; font-size: 1rem; transition: all 0.2s; }
+        input:focus, textarea:focus, select:focus { border-color: #2563eb; box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1); }
+        .custom-scrollbar::-webkit-scrollbar { height: 8px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: #f1f1f1; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
+        .action-btn { transition: all 0.2s; }
+        .action-btn:active { transform: scale(0.9); }
+        .no-scrollbar::-webkit-scrollbar { display: none; }
+    </style>
+
+    <!-- Firebase Logic -->
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
         import { getAuth, onAuthStateChanged, signInAnonymously, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        import { getFirestore, collection, addDoc, updateDoc, deleteDoc, doc, onSnapshot, query, getDocs } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { getFirestore, collection, addDoc, updateDoc, deleteDoc, doc, onSnapshot } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
-        // Global Variables provided by environment
-        const firebaseConfig = JSON.parse(__firebase_config);
+        // Environment Variables Handling
+        let firebaseConfig = {};
+        try {
+            firebaseConfig = typeof __firebase_config === 'string' ? JSON.parse(__firebase_config) : (__firebase_config || {});
+        } catch (e) {
+            console.error("Firebase config error", e);
+        }
+
         const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
         const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
 
-        // Initialize Firebase
         const app = initializeApp(firebaseConfig);
         const auth = getAuth(app);
         const db = getFirestore(app);
 
-        // State
         let gcData = [];
         let currentUser = null;
 
-        // UI Helpers
+        // --- GLOBAL UI FUNCTIONS ---
         window.prepareNewForm = () => {
-            document.getElementById('gc-form').reset();
+            const form = document.getElementById('gc-form');
+            if (form) form.reset();
             document.getElementById('editing-id').value = '';
             document.getElementById('form-title-text').innerText = 'General Questions';
             document.getElementById('submit-btn').innerText = 'Submit Records';
-            toggleView('form');
-            showSet(1);
+            window.toggleView('form');
+            window.showSet(1);
         };
 
         window.showSet = (setNum) => {
@@ -44,10 +64,14 @@
                 b.classList.remove('active', 'text-blue-600');
                 b.classList.add('text-gray-500');
             });
-            document.getElementById(`set-${setNum}`).classList.add('active');
-            document.getElementById(`tab-${setNum}`).classList.add('active');
-            document.getElementById(`tab-${setNum}`).classList.remove('text-gray-500');
-            document.getElementById(`tab-${setNum}`).scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
+            const section = document.getElementById(`set-${setNum}`);
+            const tab = document.getElementById(`tab-${setNum}`);
+            if (section) section.classList.add('active');
+            if (tab) {
+                tab.classList.add('active');
+                tab.classList.remove('text-gray-500');
+                tab.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
+            }
             window.scrollTo({ top: 0, behavior: 'smooth' });
         };
 
@@ -65,7 +89,7 @@
             }
         };
 
-        // Database Operations
+        // --- DATABASE OPERATIONS ---
         const recordsCol = collection(db, 'artifacts', appId, 'public', 'data', 'gc_records');
 
         async function initAuth() {
@@ -77,18 +101,18 @@
                 }
             } catch (error) {
                 console.error("Auth failed", error);
+                window.showToast("Connection Error", "error");
             }
         }
 
         onAuthStateChanged(auth, (user) => {
             currentUser = user;
             if (user) {
-                // Real-time listener for data
                 onSnapshot(recordsCol, (snapshot) => {
                     gcData = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id }));
                     renderTable();
                 }, (error) => {
-                    console.error("Snapshot failed", error);
+                    console.error("Snapshot error", error);
                 });
             }
         });
@@ -96,8 +120,9 @@
         document.getElementById('gc-form').addEventListener('submit', async (e) => {
             e.preventDefault();
             if (!currentUser) {
-                showToast("Not authenticated", "error");
-                return;
+                window.showToast("Connecting to server...", "error");
+                await initAuth();
+                if (!currentUser) return;
             }
 
             const recordId = document.getElementById('editing-id').value;
@@ -123,27 +148,28 @@
             try {
                 if (recordId) {
                     await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'gc_records', recordId), data);
-                    showToast("Record updated!", "success");
+                    window.showToast("Record updated!", "success");
                 } else {
                     data.createdAt = Date.now();
                     await addDoc(recordsCol, data);
-                    showToast("Record saved!", "success");
+                    window.showToast("Record saved!", "success");
                 }
-                prepareNewForm();
-                toggleView('list');
+                window.prepareNewForm();
+                window.toggleView('list');
             } catch (err) {
-                showToast("Failed to save data", "error");
+                console.error("Save error", err);
+                window.showToast("Failed to save", "error");
             }
         });
 
         window.deleteRecord = (id) => {
-            openModal("Delete Record?", "Are you sure you want to remove this entry?", async () => {
+            window.openModal("Delete Record?", "Delete this employee entry permanently?", async () => {
                 try {
                     await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'gc_records', id));
-                    showToast("Record deleted", "error");
-                    closeModal();
+                    window.showToast("Record deleted", "error");
+                    window.closeModal();
                 } catch (err) {
-                    showToast("Delete failed", "error");
+                    window.showToast("Delete failed", "error");
                 }
             });
         };
@@ -172,13 +198,15 @@
             document.getElementById('form-title-text').innerText = 'Updating Records...';
             document.getElementById('submit-btn').innerText = 'Update Information';
             
-            toggleView('form');
-            showSet(1);
+            window.toggleView('form');
+            window.showSet(1);
         };
 
         function renderTable() {
             const tbody = document.getElementById('table-body');
             const noData = document.getElementById('no-data');
+            if (!tbody) return;
+            
             tbody.innerHTML = '';
             
             if (gcData.length === 0) {
@@ -224,40 +252,24 @@
 
         window.downloadExcel = () => {
             if (gcData.length === 0) {
-                showToast("No records to export!", "error");
+                window.showToast("No data to export", "error");
                 return;
             }
             const header1 = ["General question", "", "", "", "", "Training Related Questions:", "", "", "", "Positive / Negative Feedback", "", "", "", "", "HR FEEDBACK:"];
-            const header2 = ["Aapka naam kya hai?", "Time Warehouse", "Shift Timing", "Safety Info", "Team Support", "Proper Training", "Machine Training", "Imp Suggestions", "Tr. Days", "Best Thing", "Culture", "Problems", "Changes", "Overall Exp", "HR REMARKS"];
+            const header2 = ["Name", "Tenure", "Shift", "Safety", "Support", "Join Tr.", "Mach Tr.", "Imp.", "Days", "Best", "Culture", "Problem", "Change", "Exp", "HR Remarks"];
             const rows = gcData.map(item => [item.q1, item.q2, item.q3, item.q4, item.q5, item.q6, item.q7, item.q8, item.q9, item.q10, item.q11, item.q12, item.q13, item.q14, item.hr]);
-            const worksheetData = [header1, header2, ...rows];
-            const wb = XLSX.utils.book_new();
-            const ws = XLSX.utils.aoa_to_sheet(worksheetData);
+            const ws = XLSX.utils.aoa_to_sheet([header1, header2, ...rows]);
             ws['!merges'] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: 4 } }, { s: { r: 0, c: 5 }, e: { r: 0, c: 8 } }, { s: { r: 0, c: 9 }, e: { r: 0, c: 13 } }];
-            XLSX.utils.book_append_sheet(wb, ws, "Records");
-            XLSX.writeFile(wb, `GC_INFO_PRODUCTION.xlsx`);
+            const wb = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(wb, ws, "GC Records");
+            XLSX.writeFile(wb, `GC_RECORDS_${new Date().toISOString().split('T')[0]}.xlsx`);
         };
 
         initAuth();
     </script>
-
-    <style>
-        body { font-family: 'Inter', sans-serif; background-color: #f8fafc; -webkit-tap-highlight-color: transparent; }
-        .form-section { display: none; }
-        .form-section.active { display: block; }
-        .tab-btn.active { border-bottom: 3px solid #2563eb; color: #2563eb; font-weight: 700; background-color: white; }
-        input, textarea, select { width: 100%; padding: 0.75rem; border: 1px solid #d1d5db; border-radius: 0.5rem; margin-top: 0.35rem; outline: none; font-size: 1rem; transition: all 0.2s; }
-        input:focus, textarea:focus, select:focus { border-color: #2563eb; box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1); }
-        .custom-scrollbar::-webkit-scrollbar { height: 8px; }
-        .custom-scrollbar::-webkit-scrollbar-track { background: #f1f1f1; }
-        .custom-scrollbar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
-        .action-btn { transition: all 0.2s; }
-        .action-btn:active { transform: scale(0.9); }
-        .no-scrollbar::-webkit-scrollbar { display: none; }
-    </style>
 </head>
-<body class="min-h-screen pb-10">
 
+<body class="min-h-screen pb-10">
     <!-- Header -->
     <header class="bg-white border-b border-gray-200 px-4 md:px-6 py-4 flex flex-col sm:flex-row justify-between items-center sticky top-0 z-50 gap-4 shadow-sm">
         <div class="flex items-center gap-3 w-full sm:w-auto">
@@ -273,7 +285,6 @@
     </header>
 
     <main class="max-w-6xl mx-auto p-4 md:p-6">
-        
         <!-- Form Section -->
         <div id="form-container" class="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
             <div class="flex border-b border-gray-200 bg-gray-50 overflow-x-auto no-scrollbar">
@@ -293,8 +304,8 @@
                     <div class="grid grid-cols-1 md:grid-cols-2 gap-5 md:gap-6">
                         <div><label class="text-sm font-semibold text-gray-600">Aapka naam kya hai?</label><input type="text" id="q1" placeholder="Full Name" required></div>
                         <div><label class="text-sm font-semibold text-gray-600">Time in warehouse?</label><input type="text" id="q2" placeholder="e.g. 6 months"></div>
-                        <div><label class="text-sm font-semibold text-gray-600">Shift timing?</label><select id="q3"><option value="">Select Shift</option><option value="A Shift">A Shift (6am - 2pm)</option><option value="B Shift">B Shift (2pm - 10pm)</option><option value="C Shift">C Shift (10pm - 6am)</option><option value="General">General Shift</option></select></div>
-                        <div><label class="text-sm font-semibold text-gray-600">Safety rules info given?</label><select id="q4"><option value="Yes">Yes (Haan)</option><option value="No">No (Nahi)</option></select></div>
+                        <div><label class="text-sm font-semibold text-gray-600">Shift timing?</label><select id="q3"><option value="">Select Shift</option><option value="A Shift">A Shift</option><option value="B Shift">B Shift</option><option value="C Shift">C Shift</option><option value="General">General</option></select></div>
+                        <div><label class="text-sm font-semibold text-gray-600">Safety rules info given?</label><select id="q4"><option value="Yes">Yes</option><option value="No">No</option></select></div>
                         <div class="md:col-span-2"><label class="text-sm font-semibold text-gray-600">Team support milta hai?</label><input type="text" id="q5" placeholder="Team behavior/support"></div>
                     </div>
                     <div class="flex justify-end pt-4"><button type="button" onclick="showSet(2)" class="w-full md:w-auto px-8 py-3 bg-blue-600 text-white rounded-xl font-bold">Continue to Training</button></div>
@@ -314,16 +325,11 @@
                 <div id="set-3" class="form-section space-y-6">
                     <div class="flex items-center gap-2 mb-4"><span class="bg-green-100 text-green-700 w-8 h-8 rounded-full flex items-center justify-center font-bold">3</span><h2 class="text-lg font-bold text-gray-800 uppercase text-sm tracking-wide">Final Feedback</h2></div>
                     <div class="grid grid-cols-1 gap-5">
-                        <div class="grid grid-cols-1 md:grid-cols-2 gap-5">
-                            <div><label class="text-sm font-semibold text-gray-600">Best thing about warehouse?</label><input type="text" id="q10"></div>
-                            <div><label class="text-sm font-semibold text-gray-600">Work culture rating/opinion?</label><input type="text" id="q11"></div>
-                        </div>
-                        <div><label class="text-sm font-semibold text-gray-600">Biggest problem faced?</label><textarea id="q12" rows="2"></textarea></div>
-                        <div><label class="text-sm font-semibold text-gray-600">One change you want to see?</label><input type="text" id="q13"></div>
-                        <div><label class="text-sm font-semibold text-gray-600">Overall experience (+/-)? Why?</label><textarea id="q14" rows="2"></textarea></div>
+                        <div><label class="text-sm font-semibold text-gray-600">Best thing about warehouse?</label><input type="text" id="q10"></div>
+                        <div><label class="text-sm font-semibold text-gray-600">Problem faced?</label><textarea id="q12" rows="2"></textarea></div>
                         <div class="mt-4 p-5 bg-blue-50 border border-blue-100 rounded-2xl"><label class="block text-xs font-bold text-blue-800 mb-2 uppercase tracking-widest">FINAL HR FEEDBACK</label><textarea id="hr_feedback" rows="3" class="bg-white border-blue-200"></textarea></div>
                     </div>
-                    <div class="flex flex-col-reverse md:flex-row justify-between gap-3 pt-6"><button type="button" onclick="showSet(2)" class="px-8 py-3 bg-gray-100 text-gray-700 rounded-xl font-bold">Back</button><button type="submit" id="submit-btn" class="px-10 py-4 bg-green-600 hover:bg-green-700 text-white rounded-xl font-black text-lg transition-all shadow-xl active:scale-95">Submit Records</button></div>
+                    <div class="flex flex-col-reverse md:flex-row justify-between gap-3 pt-6"><button type="button" onclick="showSet(2)" class="px-8 py-3 bg-gray-100 text-gray-700 rounded-xl font-bold">Back</button><button type="submit" id="submit-btn" class="px-10 py-4 bg-green-600 hover:bg-green-700 text-white rounded-xl font-black text-lg transition-all shadow-xl">Submit Records</button></div>
                 </div>
             </form>
         </div>
@@ -332,12 +338,9 @@
         <div id="list-container" class="hidden">
             <div class="bg-white rounded-2xl shadow-sm border border-gray-200 p-4 md:p-6">
                 <div class="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-4">
-                    <div>
-                        <h2 class="text-xl font-black text-gray-800">GC RECORDS</h2>
-                        <p class="text-sm text-gray-500">Manage all employee entries</p>
-                    </div>
+                    <div><h2 class="text-xl font-black text-gray-800">GC RECORDS</h2><p class="text-sm text-gray-500">History of entries</p></div>
                     <div class="flex flex-wrap gap-2 w-full md:w-auto">
-                        <button onclick="prepareNewForm()" class="flex-1 md:flex-none flex items-center justify-center gap-2 px-4 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold transition-all shadow-lg active:scale-95">
+                        <button onclick="prepareNewForm()" class="flex-1 md:flex-none flex items-center justify-center gap-2 px-4 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold transition-all shadow-lg">
                             <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
                             Fill New Record
                         </button>
@@ -349,81 +352,53 @@
                 </div>
 
                 <div class="overflow-x-auto rounded-xl border border-gray-100 custom-scrollbar">
-                    <table class="min-w-full divide-y divide-gray-200 text-[11px] md:text-xs">
+                    <table class="min-w-full divide-y divide-gray-200 text-xs">
                         <thead class="bg-gray-50">
-                            <tr>
-                                <th class="px-3 py-3 text-center border-r font-bold text-gray-700 bg-gray-100">ACTIONS</th>
-                                <th colspan="5" class="px-4 py-3 text-center border-r font-bold text-blue-700 uppercase bg-blue-50/50">General Questions</th>
-                                <th colspan="4" class="px-4 py-3 text-center border-r font-bold text-orange-700 uppercase bg-orange-50/50">Training Related</th>
-                                <th colspan="5" class="px-4 py-3 text-center border-r font-bold text-green-700 uppercase bg-green-50/50">Feedback</th>
-                                <th class="px-4 py-3 text-center font-bold text-gray-700 uppercase bg-gray-100">HR Remarks</th>
-                            </tr>
-                            <tr class="divide-x divide-gray-200">
-                                <th class="px-3 py-4">Manage</th>
-                                <th class="px-3 py-4 text-left font-bold text-gray-500 whitespace-nowrap">Name</th>
-                                <th class="px-3 py-4 text-left font-bold text-gray-500 whitespace-nowrap">Tenure</th>
-                                <th class="px-3 py-4 text-left font-bold text-gray-500 whitespace-nowrap">Shift</th>
-                                <th class="px-3 py-4 text-left font-bold text-gray-500 whitespace-nowrap">Safety</th>
-                                <th class="px-3 py-4 text-left font-bold text-gray-500 whitespace-nowrap">Support</th>
-                                <th class="px-3 py-4 text-left font-bold text-gray-500 whitespace-nowrap">Join Tr.</th>
-                                <th class="px-3 py-4 text-left font-bold text-gray-500 whitespace-nowrap">Mach Tr.</th>
-                                <th class="px-3 py-4 text-left font-bold text-gray-500 whitespace-nowrap">Imp.</th>
-                                <th class="px-3 py-4 text-left font-bold text-gray-500 whitespace-nowrap">Days</th>
-                                <th class="px-3 py-4 text-left font-bold text-gray-500 whitespace-nowrap">Best</th>
-                                <th class="px-3 py-4 text-left font-bold text-gray-500 whitespace-nowrap">Culture</th>
-                                <th class="px-3 py-4 text-left font-bold text-gray-500 whitespace-nowrap">Problem</th>
-                                <th class="px-3 py-4 text-left font-bold text-gray-500 whitespace-nowrap">Change</th>
-                                <th class="px-3 py-4 text-left font-bold text-gray-500 whitespace-nowrap">Exp.</th>
-                                <th class="px-3 py-4 text-left font-bold text-gray-500">Comments</th>
-                            </tr>
+                            <tr><th class="px-3 py-3 border-r">Manage</th><th colspan="5" class="px-3 py-3 border-r bg-blue-50/30">General</th><th colspan="4" class="px-3 py-3 border-r bg-orange-50/30">Training</th><th colspan="4" class="px-3 py-3 bg-green-50/30">Feedback</th><th>HR</th></tr>
                         </thead>
                         <tbody id="table-body" class="bg-white divide-y divide-gray-100"></tbody>
                     </table>
                 </div>
-                <div id="no-data" class="py-20 text-center flex flex-col items-center">
-                    <p class="text-gray-400 font-medium italic">No employee records found.</p>
-                </div>
+                <div id="no-data" class="py-20 text-center text-gray-400 italic">No records found.</div>
             </div>
         </div>
     </main>
 
-    <!-- UI Components -->
+    <!-- Components -->
     <div id="toast" class="fixed bottom-6 left-1/2 -translate-x-1/2 md:translate-x-0 md:left-auto md:right-6 translate-y-20 opacity-0 bg-gray-900 text-white px-6 py-4 rounded-2xl shadow-2xl transition-all duration-300 pointer-events-none flex items-center gap-3 z-[100] w-[90%] md:w-auto">
         <div id="toast-icon-bg" class="bg-green-500 rounded-full p-1.5"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></div>
-        <span id="toast-msg" class="font-bold text-sm">Action Successful</span>
+        <span id="toast-msg" class="font-bold text-sm">Success</span>
     </div>
 
     <div id="confirm-modal" class="fixed inset-0 bg-black/50 hidden z-[101] flex items-center justify-center p-4">
         <div class="bg-white rounded-2xl p-6 max-w-sm w-full shadow-2xl scale-95 transition-all">
-            <h3 id="modal-title" class="text-lg font-bold mb-2">Are you sure?</h3>
+            <h3 id="modal-title" class="text-lg font-bold mb-2">Confirm</h3>
             <p id="modal-desc" class="text-gray-500 text-sm mb-6"></p>
             <div class="flex gap-3">
                 <button onclick="closeModal()" class="flex-1 py-3 bg-gray-100 rounded-xl font-bold">Cancel</button>
-                <button id="modal-confirm-btn" class="flex-1 py-3 bg-red-600 text-white rounded-xl font-bold">Confirm</button>
+                <button id="modal-confirm-btn" class="flex-1 py-3 bg-red-600 text-white rounded-xl font-bold">Yes</button>
             </div>
         </div>
     </div>
 
     <script>
-        // Non-Firebase dependent UI functions
-        function showToast(msg, type = "success") {
+        // Simple non-module helpers for modal/toast
+        window.showToast = (msg, type = "success") => {
             const toast = document.getElementById('toast');
-            const iconBg = document.getElementById('toast-icon-bg');
+            const bg = document.getElementById('toast-icon-bg');
             document.getElementById('toast-msg').innerText = msg;
-            iconBg.className = type === "error" ? 'bg-red-500 rounded-full p-1.5' : 'bg-green-500 rounded-full p-1.5';
+            bg.className = type === "error" ? 'bg-red-500 rounded-full p-1.5' : 'bg-green-500 rounded-full p-1.5';
             toast.classList.remove('translate-y-20', 'opacity-0');
             toast.classList.add('translate-y-0', 'opacity-100');
             setTimeout(() => { toast.classList.add('translate-y-20', 'opacity-0'); toast.classList.remove('translate-y-0', 'opacity-100'); }, 3000);
-        }
-
-        function openModal(title, desc, onConfirm) {
+        };
+        window.openModal = (title, desc, onConfirm) => {
             document.getElementById('modal-title').innerText = title;
             document.getElementById('modal-desc').innerText = desc;
             document.getElementById('modal-confirm-btn').onclick = onConfirm;
             document.getElementById('confirm-modal').classList.remove('hidden');
-        }
-
-        function closeModal() { document.getElementById('confirm-modal').classList.add('hidden'); }
+        };
+        window.closeModal = () => document.getElementById('confirm-modal').classList.add('hidden');
     </script>
 </body>
 </html>
