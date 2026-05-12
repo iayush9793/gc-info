@@ -29,7 +29,7 @@
         import { getAuth, onAuthStateChanged, signInAnonymously } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
         import { getFirestore, collection, addDoc, updateDoc, deleteDoc, doc, onSnapshot } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
-        // --- 1. FIREBASE CONFIGURATION (UPDATED) ---
+        // --- FIREBASE CONFIGURATION ---
         const firebaseConfig = {
             apiKey: "AIzaSyDG373JsaEW5P-J1LxXIoXc7qfFvzJd4uI",
             authDomain: "gcdash-245e6.firebaseapp.com",
@@ -54,8 +54,9 @@
             const form = document.getElementById('gc-form');
             if (form) form.reset();
             document.getElementById('editing-id').value = '';
-            document.getElementById('form-title-text').innerText = 'Set 1: General Questions';
-            document.getElementById('submit-btn').innerText = 'Submit Records';
+            document.getElementById('form-title-text').innerText = 'Set 1: General';
+            document.getElementById('submit-btn').innerText = 'SUBMIT RECORD';
+            document.getElementById('submit-btn').disabled = false;
             window.toggleView('form');
             window.showSet(1);
         };
@@ -91,28 +92,51 @@
             }
         };
 
-        // --- DATABASE OPS ---
-        onAuthStateChanged(auth, async (user) => {
-            currentUser = user;
-            if (!user) {
+        // --- AUTH & DATA SYNC ---
+        const initFirebase = async () => {
+            try {
                 await signInAnonymously(auth);
-            } else {
+            } catch (err) {
+                console.error("Auth Error:", err);
+                window.showToast("Database Connection Error", "error");
+            }
+        };
+
+        onAuthStateChanged(auth, (user) => {
+            currentUser = user;
+            if (user) {
                 onSnapshot(recordsCol, (snapshot) => {
                     gcData = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id }));
                     renderTable(gcData);
+                }, (err) => {
+                    console.error("Firestore Error:", err);
+                    window.showToast("Database Access Error", "error");
                 });
+            } else {
+                initFirebase();
             }
         });
 
+        // --- SUBMIT HANDLER ---
         document.getElementById('gc-form').addEventListener('submit', async (e) => {
             e.preventDefault();
+            
+            if (!currentUser) {
+                window.showToast("Waiting for database connection...", "error");
+                await initFirebase();
+                if (!currentUser) return;
+            }
+
+            const submitBtn = document.getElementById('submit-btn');
+            submitBtn.innerText = "Processing...";
+            submitBtn.disabled = true;
+
             const recordId = document.getElementById('editing-id').value;
             const data = {
                 q1: document.getElementById('q1').value,
                 q2: document.getElementById('q2').value,
                 q3: document.getElementById('q3').value,
                 q4: document.getElementById('q4').value,
-                q5: document.getElementById('q5').value,
                 q6: document.getElementById('q6').value,
                 q7: document.getElementById('q7').value,
                 q8: document.getElementById('q8').value,
@@ -129,26 +153,29 @@
             try {
                 if (recordId) {
                     await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'gc_records', recordId), data);
-                    window.showToast("Record updated!", "success");
+                    window.showToast("Record updated successfully!", "success");
                 } else {
                     data.createdAt = Date.now();
                     await addDoc(recordsCol, data);
-                    window.showToast("Record saved!", "success");
+                    window.showToast("Record saved successfully!", "success");
                 }
                 window.prepareNewForm();
                 window.toggleView('list');
             } catch (err) {
-                window.showToast("Save failed", "error");
+                console.error("Submission Error:", err);
+                window.showToast("Submit Failed: Check Firestore Rules", "error");
+                submitBtn.innerText = "SUBMIT RECORD";
+                submitBtn.disabled = false;
             }
         });
 
         window.deleteRecord = (id) => {
-            window.openModal("Delete Record?", "Delete this employee entry permanently?", async () => {
+            window.openModal("Delete Record?", "Are you sure you want to delete this entry?", async () => {
                 try {
                     await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'gc_records', id));
                     window.showToast("Deleted", "error");
                     window.closeModal();
-                } catch (err) { window.showToast("Failed", "error"); }
+                } catch (err) { window.showToast("Delete failed", "error"); }
             });
         };
 
@@ -160,7 +187,6 @@
             document.getElementById('q2').value = record.q2 || '';
             document.getElementById('q3').value = record.q3 || '';
             document.getElementById('q4').value = record.q4 || '';
-            document.getElementById('q5').value = record.q5 || '';
             document.getElementById('q6').value = record.q6 || '';
             document.getElementById('q7').value = record.q7 || '';
             document.getElementById('q8').value = record.q8 || '';
@@ -172,33 +198,39 @@
             document.getElementById('q14').value = record.q14 || '';
             document.getElementById('hr_feedback').value = record.hr || '';
             document.getElementById('form-title-text').innerText = 'Updating Record...';
-            document.getElementById('submit-btn').innerText = 'Update Information';
+            document.getElementById('submit-btn').innerText = 'UPDATE RECORD';
             window.toggleView('form');
             window.showSet(1);
         };
 
         window.downloadExcel = () => {
-            if (!gcData.length) return window.showToast("No data", "error");
-            const header1 = ["General question", "", "", "", "", "Training Related Questions:", "", "", "", "Positive / Negative Feedback", "", "", "", "", "HR FEEDBACK:"];
+            if (!gcData.length) return window.showToast("No data to export", "error");
+            const header1 = ["Set 1: General", "", "", "", "Set 2 : Training", "", "", "", "Set 3 : Positive / Negative / Feedback", "", "", "", "", "HR FEEDBACK:"];
             const header2 = [
-                "Aapka naam kya hai?", 
-                "Aap kitne time se warehouse me kaam kar", 
-                "Aapki shift timing kya hoti hai?", 
-                "Kya aapko safety rules ke baare me information", 
-                "Aapko team support milta hai ya nahi?", 
-                "Kya joining ke time aapko proper training", 
-                "Kya aapko machines/equip ment use karna", 
-                "Aapke according training me kya improvement", 
-                "Training kitne din ki thi?", 
-                "Warehouse ki sabse achhi cheez kya lagti", 
-                "Aapko yaha ka work culture kaisa lagta hai?", 
-                "Aapko kaam karte time sabse zyada problem", 
-                "Agar aapko koi ek change karna ho warehouse", 
-                "Overall aapka experience positive hai ya"
+                "Name", 
+                "Employee ID", 
+                "Safety Rules Informed?", 
+                "Team Support?", 
+                "Proper joining training?", 
+                "Machines/Equipment taught?", 
+                "Training Improvements", 
+                "Training Duration", 
+                "Like most about company", 
+                "Work culture", 
+                "Problem faced", 
+                "One change", 
+                "Overall Experience",
+                "HR FEEDBACK:"
             ];
-            const rows = gcData.map(i => [i.q1, i.q2, i.q3, i.q4, i.q5, i.q6, i.q7, i.q8, i.q9, i.q10, i.q11, i.q12, i.q13, i.q14, i.hr]);
+            const rows = gcData.map(i => [
+                i.q1, i.q2, i.q3, i.q4, i.q6, i.q7, i.q8, i.q9, i.q10, i.q11, i.q12, i.q13, i.q14, i.hr
+            ]);
             const ws = XLSX.utils.aoa_to_sheet([header1, header2, ...rows]);
-            ws['!merges'] = [{s:{r:0,c:0},e:{r:0,c:4}},{s:{r:0,c:5},e:{r:0,c:8}},{s:{r:0,c:9},e:{r:0,c:13}}];
+            ws['!merges'] = [
+                {s:{r:0,c:0},e:{r:0,c:3}}, // General
+                {s:{r:0,c:4},e:{r:0,c:7}}, // Training
+                {s:{r:0,c:8},e:{r:0,c:12}} // Feedback
+            ];
             const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, "GC Records");
             XLSX.writeFile(wb, "GC_RECORDS.xlsx");
         };
@@ -215,10 +247,23 @@
                 row.className = "divide-x divide-gray-100 hover:bg-blue-50/20";
                 row.innerHTML = `
                     <td class="px-3 py-4 text-center whitespace-nowrap"><div class="flex gap-2 justify-center">
-                        <button onclick="editRecord('${item.id}')" class="p-1.5 bg-blue-50 text-blue-600 rounded">Edit</button>
-                        <button onclick="deleteRecord('${item.id}')" class="p-1.5 bg-red-50 text-red-600 rounded">Del</button>
+                        <button onclick="editRecord('${item.id}')" class="p-1.5 bg-blue-50 text-blue-600 rounded text-[10px] font-bold">EDIT</button>
+                        <button onclick="deleteRecord('${item.id}')" class="p-1.5 bg-red-50 text-red-600 rounded text-[10px] font-bold">DEL</button>
                     </div></td>
-                    <td class="px-3 py-4 font-bold">${item.q1||'—'}</td><td class="px-3 py-4">${item.q2||'—'}</td><td class="px-3 py-4">${item.q3||'—'}</td><td class="px-3 py-4">${item.q4||'—'}</td><td class="px-3 py-4">${item.q5||'—'}</td><td class="px-3 py-4">${item.q6||'—'}</td><td class="px-3 py-4">${item.q7||'—'}</td><td class="px-3 py-4">${item.q8||'—'}</td><td class="px-3 py-4">${item.q9||'—'}</td><td class="px-3 py-4">${item.q10||'—'}</td><td class="px-3 py-4">${item.q11||'—'}</td><td class="px-3 py-4">${item.q12||'—'}</td><td class="px-3 py-4">${item.q13||'—'}</td><td class="px-3 py-4">${item.q14||'—'}</td><td class="px-3 py-4 italic text-blue-800">${item.hr||'—'}</td>
+                    <td class="px-3 py-4 font-bold">${item.q1||'—'}</td>
+                    <td class="px-3 py-4">${item.q2||'—'}</td>
+                    <td class="px-3 py-4">${item.q3||'—'}</td>
+                    <td class="px-3 py-4">${item.q4||'—'}</td>
+                    <td class="px-3 py-4">${item.q6||'—'}</td>
+                    <td class="px-3 py-4">${item.q7||'—'}</td>
+                    <td class="px-3 py-4">${item.q8||'—'}</td>
+                    <td class="px-3 py-4">${item.q9||'—'}</td>
+                    <td class="px-3 py-4">${item.q10||'—'}</td>
+                    <td class="px-3 py-4">${item.q11||'—'}</td>
+                    <td class="px-3 py-4">${item.q12||'—'}</td>
+                    <td class="px-3 py-4">${item.q13||'—'}</td>
+                    <td class="px-3 py-4">${item.q14||'—'}</td>
+                    <td class="px-3 py-4 italic text-blue-800">${item.hr||'—'}</td>
                 `;
                 tbody.appendChild(row);
             });
@@ -230,20 +275,20 @@
     <header class="bg-white border-b px-4 md:px-6 py-4 flex flex-col sm:flex-row justify-between items-center sticky top-0 z-50 gap-4 shadow-sm">
         <div class="flex items-center gap-3">
             <div class="bg-blue-600 p-2 rounded-lg text-white font-bold">GC</div>
-            <h1 class="text-lg md:text-xl font-bold text-gray-800">GC INFORMATION</h1>
+            <h1 class="text-lg md:text-xl font-bold text-gray-800 uppercase">GC INFORMATION</h1>
         </div>
         <div class="flex gap-2 w-full sm:w-auto">
             <button onclick="prepareNewForm()" id="btn-show-form" class="hidden flex-1 px-4 py-2.5 bg-gray-100 text-gray-700 rounded-lg font-semibold text-sm">Add New Record</button>
-            <button onclick="toggleView('list')" id="btn-show-list" class="flex-1 px-4 py-2.5 bg-blue-600 text-white rounded-lg font-semibold text-sm shadow-sm">View Details of GC</button>
+            <button onclick="toggleView('list')" id="btn-show-list" class="flex-1 px-4 py-2.5 bg-blue-600 text-white rounded-lg font-semibold text-sm shadow-sm uppercase tracking-wide">View Details</button>
         </div>
     </header>
 
     <main class="max-w-6xl mx-auto p-4 md:p-6">
         <div id="form-container" class="bg-white rounded-2xl shadow-sm border overflow-hidden">
             <div class="flex border-b bg-gray-50 overflow-x-auto no-scrollbar">
-                <button onclick="showSet(1)" id="tab-1" class="tab-btn min-w-[120px] flex-1 py-4 text-xs font-medium active">Set 1: General</button>
-                <button onclick="showSet(2)" id="tab-2" class="tab-btn min-w-[120px] flex-1 py-4 text-xs font-medium text-gray-500">Set 2: Training</button>
-                <button onclick="showSet(3)" id="tab-3" class="tab-btn min-w-[120px] flex-1 py-4 text-xs font-medium text-gray-500">Set 3: Feedback</button>
+                <button onclick="showSet(1)" id="tab-1" class="tab-btn min-w-[120px] flex-1 py-4 text-xs font-bold uppercase active">Set 1: General</button>
+                <button onclick="showSet(2)" id="tab-2" class="tab-btn min-w-[120px] flex-1 py-4 text-xs font-bold uppercase text-gray-500">Set 2: Training</button>
+                <button onclick="showSet(3)" id="tab-3" class="tab-btn min-w-[120px] flex-1 py-4 text-xs font-bold uppercase text-gray-500">Set 3: Feedback</button>
             </div>
 
             <form id="gc-form" class="p-5 md:p-8">
@@ -251,77 +296,100 @@
                 
                 <!-- Set 1 -->
                 <div id="set-1" class="form-section active space-y-6">
-                    <h2 id="form-title-text" class="text-lg font-bold text-gray-800">General question</h2>
+                    <h2 id="form-title-text" class="text-lg font-bold text-gray-800 uppercase tracking-tight">Set 1: General</h2>
                     <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div><label class="text-sm font-semibold">1- Aapka naam kya hai?</label><input type="text" id="q1" placeholder="Enter name" required></div>
-                        <div><label class="text-sm font-semibold">2- Aap kitne time se warehouse me kaam kar rahe ho?</label><input type="text" id="q2"></div>
-                        <div><label class="text-sm font-semibold">3- Aapki shift timing kya hoti hai?</label><input type="text" id="q3"></div>
-                        <div><label class="text-sm font-semibold">4- Kya aapko safety rules ke baare me information di gayi hai?</label><select id="q4"><option value="Yes">Yes</option><option value="No">No</option></select></div>
-                        <div class="md:col-span-2"><label class="text-sm font-semibold">5- Aapko team support milta hai ya nahi?</label><input type="text" id="q5"></div>
+                        <div><label class="text-xs font-bold text-gray-500 uppercase">1 - Name</label><input type="text" id="q1" placeholder="Enter full name" required></div>
+                        <div><label class="text-xs font-bold text-gray-500 uppercase">2 - Employee ID</label><input type="text" id="q2" placeholder="Enter ID"></div>
+                        <div><label class="text-xs font-bold text-gray-500 uppercase">3 - Have you been informed about the safety rules?</label><select id="q3"><option value="Yes">Yes</option><option value="No">No</option></select></div>
+                        <div><label class="text-xs font-bold text-gray-500 uppercase">4- Do you get support from team or not.</label><input type="text" id="q4" placeholder="Enter feedback on support"></div>
                     </div>
-                    <button type="button" onclick="showSet(2)" class="w-full md:w-auto px-10 py-3 bg-blue-600 text-white rounded-xl font-bold">Continue</button>
+                    <button type="button" onclick="showSet(2)" class="w-full md:w-auto px-10 py-3 bg-blue-600 text-white rounded-xl font-bold uppercase text-sm">Next Section</button>
                 </div>
 
                 <!-- Set 2 -->
                 <div id="set-2" class="form-section space-y-6">
-                    <h2 class="text-lg font-bold text-gray-800">Training Related Questions:</h2>
+                    <h2 class="text-lg font-bold text-gray-800 uppercase tracking-tight">Set 2: Training</h2>
                     <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div><label class="text-sm font-semibold">1- Kya joining ke time aapko proper training di gayi thi?</label><select id="q6"><option value="Yes">Yes</option><option value="No">No</option></select></div>
-                        <div><label class="text-sm font-semibold">2- Kya aapko machines/equipment use karna sikhaya gaya?</label><select id="q7"><option value="Yes">Yes</option><option value="No">No</option></select></div>
-                        <div><label class="text-sm font-semibold">3- Aapke according training me kya improvement honi chahiye?</label><textarea id="q8"></textarea></div>
-                        <div><label class="text-sm font-semibold">4- Training kitne din ki thi?</label><input type="text" id="q9"></div>
+                        <div><label class="text-xs font-bold text-gray-500 uppercase">1- Were you given proper training at the time of joining?</label><select id="q6"><option value="Yes">Yes</option><option value="No">No</option></select></div>
+                        <div><label class="text-xs font-bold text-gray-500 uppercase">2 - Were you taught how to use machines/ equipment?</label><select id="q7"><option value="Yes">Yes</option><option value="No">No</option></select></div>
+                        <div><label class="text-xs font-bold text-gray-500 uppercase">3 - According to you, what improvements should be made in the training?</label><textarea id="q8" placeholder="Enter suggestions"></textarea></div>
+                        <div><label class="text-xs font-bold text-gray-500 uppercase">4- How many days did the training last?</label><input type="text" id="q9" placeholder="Enter number of days"></div>
                     </div>
-                    <div class="flex justify-between"><button type="button" onclick="showSet(1)" class="px-8 py-3 bg-gray-100 rounded-xl">Back</button><button type="button" onclick="showSet(3)" class="px-8 py-3 bg-blue-600 text-white rounded-xl font-bold">Continue</button></div>
+                    <div class="flex justify-between"><button type="button" onclick="showSet(1)" class="px-8 py-3 bg-gray-100 rounded-xl font-bold uppercase text-xs">Back</button><button type="button" onclick="showSet(3)" class="px-8 py-3 bg-blue-600 text-white rounded-xl font-bold uppercase text-xs">Next Section</button></div>
                 </div>
 
                 <!-- Set 3 -->
                 <div id="set-3" class="form-section space-y-6">
-                    <h2 class="text-lg font-bold text-gray-800">Positive / Negative Feedback</h2>
+                    <h2 class="text-lg font-bold text-gray-800 uppercase tracking-tight">Set 3: Positive / Negative / Feedback</h2>
                     <div class="space-y-4">
-                        <div><label class="text-sm font-semibold">1- Warehouse ki sabse achhi cheez kya lagti hai?</label><input type="text" id="q10"></div>
-                        <div><label class="text-sm font-semibold">2- Aapko yaha ka work culture kaisa lagta hai?</label><input type="text" id="q11"></div>
-                        <div><label class="text-sm font-semibold">3- Aapko kaam karte time sabse zyada problem kis cheez me hoti hai?</label><textarea id="q12"></textarea></div>
-                        <div><label class="text-sm font-semibold">4- Agar aapko koi ek change karna ho warehouse me, toh kya karoge?</label><input type="text" id="q13"></div>
-                        <div><label class="text-sm font-semibold">5- Overall aapka experience positive hai ya negative? Kyu?</label><textarea id="q14"></textarea></div>
-                        <div class="p-5 bg-blue-50 border rounded-2xl"><label class="font-bold block text-blue-900">HR FEEDBACK:</label><textarea id="hr_feedback" class="bg-white border-blue-200"></textarea></div>
+                        <div><label class="text-xs font-bold text-gray-500 uppercase">1- What do you like the most about the company?</label><input type="text" id="q10"></div>
+                        <div><label class="text-xs font-bold text-gray-500 uppercase">2 - How do you find the work culture here?</label><input type="text" id="q11"></div>
+                        <div><label class="text-xs font-bold text-gray-500 uppercase">3- What problem do you face the most while working?</label><textarea id="q12"></textarea></div>
+                        <div><label class="text-xs font-bold text-gray-500 uppercase">4- If you could make one change in the company, what would it be?</label><input type="text" id="q13"></div>
+                        <div><label class="text-xs font-bold text-gray-500 uppercase">5- Overall, is your experience positive or negative?</label><textarea id="q14" placeholder="Positive/Negative and why?"></textarea></div>
+                        <div class="p-5 bg-blue-50 border rounded-2xl"><label class="text-xs font-bold block text-blue-900 uppercase mb-2">Final HR Feedback:</label><textarea id="hr_feedback" class="bg-white border-blue-200" placeholder="Enter HR summary"></textarea></div>
                     </div>
-                    <div class="flex justify-between mt-6"><button type="button" onclick="showSet(2)" class="px-8 py-3 bg-gray-100 rounded-xl font-bold">Back</button><button type="submit" id="submit-btn" class="px-12 py-4 bg-green-600 text-white rounded-xl font-black text-lg shadow-xl active:scale-95 transition-all">SUBMIT RECORD</button></div>
+                    <div class="flex justify-between mt-6"><button type="button" onclick="showSet(2)" class="px-8 py-3 bg-gray-100 rounded-xl font-bold uppercase text-xs">Back</button><button type="submit" id="submit-btn" class="px-12 py-4 bg-green-600 text-white rounded-xl font-black text-lg shadow-xl active:scale-95 transition-all">SUBMIT RECORD</button></div>
                 </div>
             </form>
         </div>
 
+        <!-- List -->
         <div id="list-container" class="hidden">
             <div class="bg-white rounded-2xl shadow-sm border p-4 md:p-6">
                 <div class="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-4">
-                    <div><h2 class="text-xl font-black text-gray-800 uppercase">GC Records</h2><p class="text-sm text-gray-500 italic">History of employee interviews</p></div>
+                    <div><h2 class="text-xl font-black text-gray-800 uppercase">GC Feedback Records</h2><p class="text-sm text-gray-500 italic">Historical data overview</p></div>
                     <div class="flex gap-2 w-full md:w-auto">
-                        <button onclick="prepareNewForm()" class="flex-1 px-4 py-3 bg-blue-600 text-white rounded-xl font-bold text-sm">Fill New Record</button>
-                        <button onclick="downloadExcel()" class="flex-1 px-4 py-3 bg-green-600 text-white rounded-xl font-bold text-sm">Download Excel</button>
+                        <button onclick="prepareNewForm()" class="flex-1 px-4 py-3 bg-blue-600 text-white rounded-xl font-bold text-xs uppercase">Fill New</button>
+                        <button onclick="downloadExcel()" class="flex-1 px-4 py-3 bg-green-600 text-white rounded-xl font-bold text-xs uppercase">Export Excel</button>
                     </div>
                 </div>
                 <div class="overflow-x-auto rounded-xl border custom-scrollbar">
-                    <table class="min-w-full divide-y divide-gray-200 text-[10px]">
+                    <table class="min-w-full divide-y divide-gray-200 text-[9px]">
                         <thead class="bg-gray-50">
-                            <tr><th class="px-2 py-3 border-r bg-gray-200">Actions</th><th colspan="5" class="px-2 py-3 border-r bg-blue-100">General question</th><th colspan="4" class="px-2 py-3 border-r bg-orange-100">Training Related Questions:</th><th colspan="5" class="px-2 py-3 bg-green-100">Positive / Negative Feedback</th><th class="bg-gray-100">HR FEEDBACK:</th></tr>
+                            <tr>
+                                <th class="px-2 py-3 border-r bg-gray-200 uppercase font-black">Manage</th>
+                                <th colspan="4" class="px-2 py-3 border-r bg-blue-100 uppercase font-black text-blue-800">Set 1: General</th>
+                                <th colspan="4" class="px-2 py-3 border-r bg-orange-100 uppercase font-black text-orange-800">Set 2 : Training</th>
+                                <th colspan="5" class="px-2 py-3 border-r bg-green-100 uppercase font-black text-green-800">Set 3 : Feedback</th>
+                                <th class="bg-gray-100 uppercase font-black">HR</th>
+                            </tr>
+                            <tr class="divide-x divide-gray-200">
+                                <th class="px-2 py-3">Edit/Del</th>
+                                <th class="px-2 py-3">Name</th>
+                                <th class="px-2 py-3">Emp ID</th>
+                                <th class="px-2 py-3">Safety</th>
+                                <th class="px-2 py-3">Support</th>
+                                <th class="px-2 py-3">Joining Tr</th>
+                                <th class="px-2 py-3">Mach Tr</th>
+                                <th class="px-2 py-3">Imp</th>
+                                <th class="px-2 py-3">Days</th>
+                                <th class="px-2 py-3">Like Most</th>
+                                <th class="px-2 py-3">Culture</th>
+                                <th class="px-2 py-3">Prob</th>
+                                <th class="px-2 py-3">Change</th>
+                                <th class="px-2 py-3">Overall</th>
+                                <th class="px-2 py-3">HR Feedback</th>
+                            </tr>
                         </thead>
                         <tbody id="table-body" class="bg-white divide-y divide-gray-100"></tbody>
                     </table>
                 </div>
-                <div id="no-data" class="py-20 text-center text-gray-400 italic">No records found.</div>
+                <div id="no-data" class="py-20 text-center text-gray-400 italic">No records available.</div>
             </div>
         </div>
     </main>
 
     <div id="toast" class="fixed bottom-6 left-1/2 -translate-x-1/2 md:translate-x-0 md:left-auto md:right-6 translate-y-20 opacity-0 bg-gray-900 text-white px-6 py-4 rounded-2xl shadow-2xl transition-all z-[100]">
         <div id="toast-icon-bg" class="inline-block rounded-full p-1 mr-2 bg-green-500">✓</div>
-        <span id="toast-msg">Success</span>
+        <span id="toast-msg">Action Successful</span>
     </div>
 
     <div id="confirm-modal" class="fixed inset-0 bg-black/50 hidden z-[101] flex items-center justify-center p-4">
         <div class="bg-white rounded-2xl p-6 max-w-sm w-full">
-            <h3 id="modal-title" class="text-lg font-bold mb-2">Confirm Action</h3>
+            <h3 id="modal-title" class="text-lg font-bold mb-2 uppercase tracking-tight">Confirm Action</h3>
             <p id="modal-desc" class="text-gray-500 text-sm mb-6"></p>
-            <div class="flex gap-3"><button onclick="closeModal()" class="flex-1 py-3 bg-gray-100 rounded-xl">Cancel</button><button id="modal-confirm-btn" class="flex-1 py-3 bg-red-600 text-white rounded-xl font-bold">Confirm</button></div>
+            <div class="flex gap-3"><button onclick="closeModal()" class="flex-1 py-3 bg-gray-100 rounded-xl font-bold uppercase text-xs">Cancel</button><button id="modal-confirm-btn" class="flex-1 py-3 bg-red-600 text-white rounded-xl font-bold uppercase text-xs">Confirm</button></div>
         </div>
     </div>
 
